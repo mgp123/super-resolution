@@ -140,7 +140,8 @@ for spatial_dim, low_dim in [(128, 64)]:
     toPil = ToPILImage()
 
     image_grid = make_grid(images, nrow=3)
-    plt.imshow(toPil(image_grid))
-    plt.savefig(f"sr2_{spatial_dim}.png")
+    torchvision.utils.save_image(image_grid,f"sr2_{spatial_dim}.png")
+    # plt.imshow(toPil(image_grid))
+    # plt.savefig(f"sr2_{spatial_dim}.png")
 
     sample_image = sr.cpu()
