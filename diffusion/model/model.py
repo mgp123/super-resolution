@@ -201,9 +201,9 @@ class Diffusion(nn.Module):
             channel_multiplier = [channel_multiplier]*n_scales
         
         if attention_type == "fast":
-            self.attention = MultiHeadedAttentionFast(in_channels=hidden_channels* (2**n_scales), value_channels=16, out_channels=hidden_channels* (2**n_scales), n_heads=2)
+            self.attention = MultiHeadedAttentionFast(in_channels=hidden_channels* (channel_multiplier**n_scales), value_channels=16, out_channels=hidden_channels* (channel_multiplier**n_scales), n_heads=2)
         elif attention_type == "slow":
-            self.attention = MultiHeadedAttentionSlow(in_channels=hidden_channels* (2**n_scales), value_channels=16, out_channels=hidden_channels* (2**n_scales), n_heads=2)
+            self.attention = MultiHeadedAttentionSlow(in_channels=hidden_channels* (channel_multiplier**n_scales), value_channels=16, out_channels=hidden_channels* (channel_multiplier**n_scales), n_heads=2)
         else:
             raise ValueError("attention type must be slow or fast")
 
