@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.autograd.profiler as profiler
+from os.path import exists
 
 from model.self_attention import MultiHeadedAttentionFast, MultiHeadedAttentionSlow
 
@@ -185,9 +186,21 @@ class DiffusionBlock(nn.Module):
 
 
 class Diffusion(nn.Module):
-    def __init__(self, in_channels, out_channels, hidden_channels, n_scales=3, channel_multiplier=2, attention_type="fast"):
+    def __init__(
+        self, 
+        in_channels,
+        out_channels, 
+        hidden_channels, 
+        n_scales=3, 
+        channel_multiplier=2, 
+        attention_type="fast",
+        attention_channels=16, 
+        attention_heads=2,
+        attention_patch=1,
+        learned_embedding=False):
         super(Diffusion, self).__init__()
         self.out_channels = out_channels
+        self.learned_embedding = learned_embedding
         self.init_transform1 = ConvLayer(in_channels,hidden_channels) 
         self.init_transform2 = ConvLayer(in_channels,hidden_channels)
         self.end_transform = nn.Sequential(
@@ -196,6 +209,7 @@ class Diffusion(nn.Module):
         )
  
         self.pe2d = PositionalEmbeddings2dGrid(period=100)
+        d = 2
 
         if type(channel_multiplier) == int:
             channel_multiplier = [channel_multiplier]*n_scales
@@ -206,9 +220,15 @@ class Diffusion(nn.Module):
 
         
         if attention_type == "fast":
-            self.attention = MultiHeadedAttentionFast(in_channels=(mid_channels), value_channels=16, out_channels=mid_channels, n_heads=2)
+            self.attention = MultiHeadedAttentionFast(in_channels=(mid_channels+2*d), value_channels=attention_channels, out_channels=mid_channels, n_heads=attention_heads)
         elif attention_type == "slow":
-            self.attention = MultiHeadedAttentionSlow(in_channels=(mid_channels), value_channels=16, out_channels=mid_channels, n_heads=2)
+            self.attention = MultiHeadedAttentionSlow(
+                in_channels=(mid_channels if learned_embedding else mid_channels+2*d ), 
+                value_channels=attention_channels, 
+                out_channels=mid_channels, 
+                n_heads=attention_heads,
+                patch_size=attention_patch,
+                learned_embedding=learned_embedding)
         else:
             raise ValueError("attention type must be slow or fast")
 
@@ -265,13 +285,23 @@ class Diffusion(nn.Module):
         # space_embedding = self.pe2d.get(torch.arange(H*W),C) 
         # space_embedding = space_embedding.view(1,H, W, C).permute((0,3,1,2))
         # space_embedding = space_embedding.to(x.device)
-        space_embedding = self.pe2d.get(H,W,C, r1.device) 
+        if not self.learned_embedding:
+            space_embedding = self.pe2d.get(H,W,4, r1.device) 
 
-        # r1 = (self.attention(r1+space_embedding) )
-        # r2 = (self.attention(r2+space_embedding) )
+            # r1 = (self.attention(r1+space_embedding) )
+            # r2 = (self.attention(r2+space_embedding) )
+            space_embedding = space_embedding.expand(B, -1,-1,-1)
+            s1 = torch.cat([r1,space_embedding],dim=1)
+            s2 = torch.cat([r2,space_embedding],dim=1)
+        else:
+            s1 = r1
+            s2 = r2
 
-        r1.add_(self.attention(r1+space_embedding) )
-        r2.add_(self.attention(r2+space_embedding) )
+        r1.add_(self.attention(s1) )
+        r2.add_(self.attention(s2) )
+
+        # r1.add_(self.attention(r1+space_embedding) )
+        # r2.add_(self.attention(r2+space_embedding) )
 
 
     # with profiler.record_function("up transform"):
@@ -280,6 +310,29 @@ class Diffusion(nn.Module):
             r1, r2 = upscale_block(r1+l1_current, r2+l2_current, variance)
 
         return self.end_transform(r1+r2)
+
+    def load(path):
+        if exists(path):
+            save = torch.load(path)
+            parameters = save["parameters"]
+            d = Diffusion(
+                    in_channels=parameters["in_channels"],
+                    out_channels=parameters["out_channels"],
+                    hidden_channels=parameters["hidden_channels"],
+                    n_scales=parameters.get("n_scales",3),
+                    channel_multiplier=parameters.get("channel_multiplier",2),
+                    attention_type=parameters.get("attention_type","fast"),
+                    attention_channels=parameters.get("attention_channels",64),
+                    attention_heads=parameters.get("attention_heads",12),
+                    attention_patch=parameters.get("attention_patch",16),
+                    learned_embedding=parameters.get("learned_embedding",True)
+            )
+            d.load_state_dict(save['diffusion_dict'])
+            del save
+            return d
+        else:
+            raise ValueError
+
 
 
 

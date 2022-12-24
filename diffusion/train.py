@@ -28,33 +28,52 @@ def variance_scheudle(t, max_t):
 def train():
     batch_size = 16
     in_channels = 3
+    hidden_channels = 128
+    channel_multiplier = 2
+    n_scales = 2
+    attention_channels=64
+    attention_heads=12
+    attention_patch=16
+    learned_embedding=True
+    attention_type = "slow"
     max_t = 1000
     learning_rate = 1e-5
+    spatial_dim = 128
+    low_dim = 64
+    downsize = torchvision.transforms.Resize(low_dim)
+    upsize = torchvision.transforms.Resize(spatial_dim)
     initial_epoch = 0
     epochs = 1
     epochs_per_checkpoint = 1
     write_loss_every = batch_size*4
     seen_samples = 0
     device = "cuda:0"
-
-    model_name = "sr_2_scales_128_channels_fc_embeddings_16_dim_positional_attention_32_to_64_faster_attempts"
+    
+    model_name = f"sr_{n_scales}_scales_{hidden_channels}_channels_{channel_multiplier}_channel_multiplier_fc_embeddings_{attention_channels}_dim_positional_{attention_patch}_patch_attention_{attention_heads}_heads_{low_dim}_to_{spatial_dim}_{attention_type}_attention"
+    model_path = "saved_weights/" + model_name + ".model"
     makedirs("runs", exist_ok=True)
     makedirs("saved_weights", exist_ok=True)
 
-    spatial_dim = 64
-    downsize = torchvision.transforms.Resize(32)
-    upsize = torchvision.transforms.Resize(spatial_dim)
 
     writer = SummaryWriter(log_dir="runs/" + model_name)
     scaler = torch.cuda.amp.GradScaler()
 
-    d = Diffusion(
-        in_channels=in_channels*2,
-        hidden_channels=128,
-        out_channels = in_channels,
-        n_scales=2,
-        attention_type="slow"
-    )
+    try:
+        d = Diffusion.load(model_path)
+        print("loaded from checkpoint")
+    except:
+        d = Diffusion(
+            in_channels=in_channels*2,
+            hidden_channels=hidden_channels,
+            out_channels = in_channels,
+            n_scales=n_scales,
+            attention_type=attention_type,
+            channel_multiplier=channel_multiplier,
+            attention_channels=attention_channels,
+            attention_heads=attention_heads,
+            attention_patch=attention_patch,
+            learned_embedding=learned_embedding
+        )
     d = d.to(device)
 
     optimizer_d = torch.optim.Adam(
@@ -63,19 +82,18 @@ def train():
     )
     
 
-    if exists("saved_weights/" + model_name + ".model"):
-        save = torch.load("saved_weights/" + model_name + ".model")
-        d.load_state_dict(save['diffusion_dict'])
+    if exists(model_path):
+        save = torch.load(model_path)
+        # d.load_state_dict(save['diffusion_dict'])
         optimizer_d.load_state_dict(save['diffusion_optimizer'])
         del save
-        print("loaded from checkpoint")
 
     loss_getter = torch.nn.MSELoss(reduction="sum")
 
 
     data_loader_train, data_loader_test = get_data_loaders(batch_size, spatial_dim)
     variance_scheudle_progressive_alpha = 1*max_t/len(data_loader_train)
-    print(len(data_loader_train))
+    # variance_scheudle_progressive_alpha = max_t-1
     t_cap2 = 1
 
     for epoch in tqdm(range(initial_epoch, epochs), initial=initial_epoch, total=epochs, desc="epoch"):
@@ -88,11 +106,6 @@ def train():
 
             
             t_cap = int(max(1, min(max_t-1, variance_scheudle_progressive_alpha* (seen_samples//batch_size) )))
-            # t_cap = max_t-1
-            # if t_cap2 != t_cap:
-            #     print(t_cap)
-            #     t_cap2 = t_cap
-
 
             t = torch.randint(1, t_cap+1, (samples.shape[0],))
             optimizer_d.zero_grad()
@@ -120,10 +133,22 @@ def train():
 
         if (epoch+1) % epochs_per_checkpoint == 0:
             torch.save(
-            {"diffusion_dict": d.state_dict(),
-            "diffusion_optimizer": optimizer_d.state_dict(),
-            }, 
-            "saved_weights/" + model_name + ".model"
+                {"diffusion_dict": d.state_dict(),
+                "diffusion_optimizer": optimizer_d.state_dict(),
+                "parameters":{
+                    "in_channels":in_channels*2,
+                    "out_channels":in_channels,
+                    "hidden_channels":hidden_channels,
+                    "n_scales":n_scales,
+                    "attention_type":attention_type,
+                    "channel_multiplier":channel_multiplier,
+                    "attention_channels":attention_channels,
+                    "attention_heads":attention_heads,
+                    "attention_patch":attention_patch,
+                    "learned_embedding":learned_embedding
+                    }
+                }, 
+            model_path
             )
 
 train()

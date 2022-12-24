@@ -32,17 +32,34 @@ class AttentionHead(nn.Module):
 
         
     def forward(self, x):
-        B, D, H, W = x.shape
 
         Q = self.query(x)
         K = self.key(x)
         V = self.value(x)
 
+        B, D, H, W = K.shape
         # softmax(dot product)
-        affinity = torch.einsum("b d i j , b d k l -> b i j k l", Q, K).view(B, H, W, -1)
+        Q = Q.view(B,D,-1)
+        Q = torch.transpose(Q, 1, 2)
+        K = K.view(B,D,-1)
+        # affinity = torch.zeros((B,H,W,H,W),device=Q.device)
+        affinity = torch.bmm(Q, K).view(B, H, W, H, W)
+        affinity = affinity/torch.sqrt(torch.tensor(H*W*1.0,device=K.device))
+        # affinity = torch.einsum("b d i j , b d k l -> b i j k l", Q, K).view(B, H, W, -1)
         affinity = torch.nn.functional.softmax(affinity,dim=3).view(B, H, W, H, W)
+        # affinity = affinity.repeat_interleave(2, dim=2).repeat_interleave(2, dim=3)
 
-        attention = torch.einsum("b i j k l , b d k l -> b d i j", affinity, V)
+        affinity = affinity.view(B,H*W,H*W)
+        V = V.view(B,D,H*W)
+        V = torch.transpose(V, 1, 2)
+
+        attention = torch.bmm(affinity, V)
+        # print("D", D, "H",H,"W",W)
+        # print("attention", attention.shape)
+        attention = torch.transpose(attention, 1, 2).view(B,D,H,W)
+
+        # attention = torch.einsum("b i j k l , b d k l -> b d i j", affinity, V)
+        # attention = torch.zeros((B,D,H,W),device=Q.device)
         # TODO should it be divided?
         # attention = attention/(H*W)
 
@@ -50,14 +67,32 @@ class AttentionHead(nn.Module):
 
 
 class MultiHeadedAttentionSlow(nn.Module):
-    def __init__(self, in_channels, value_channels, out_channels, n_heads):
+    def __init__(self, in_channels, value_channels, out_channels, n_heads, patch_size=1, learned_embedding=False):
         super(MultiHeadedAttentionSlow, self).__init__()
+        self.patch_size = patch_size
+        self.embedding = None
+        embedding_channels = 0
+
+        if learned_embedding:
+            embedding_channels = 6
+            self.embedding_shape = 8
+            self.embedding = torch.nn.Parameter(torch.randn(1,embedding_channels,self.embedding_shape,self.embedding_shape))
+
+
+        self.encode = nn.Conv2d(
+            in_channels=in_channels, 
+            out_channels=value_channels,
+            kernel_size=patch_size,
+            stride=patch_size,
+            bias=False 
+        )
 
         self.heads = nn.ModuleList([AttentionHead(
-            channels=in_channels,
-            value_channels=value_channels
+            channels=value_channels+embedding_channels,
+            value_channels=value_channels,
             ) for _ in range(n_heads)])
         
+        self.upsample = nn.Upsample(scale_factor=patch_size) 
 
         self.decode = nn.Conv2d(
             in_channels=value_channels*n_heads, 
@@ -68,8 +103,17 @@ class MultiHeadedAttentionSlow(nn.Module):
         
         
     def forward(self, x):
-        attentions = torch.cat([head(x) for head in self.heads], dim=1)
-        y = self.decode(attentions)
+
+        y = self.encode(x)
+        if self.embedding != None:
+            B, D, H, W = y.shape
+            # assume squares (H==W)
+            emb = torch.nn.functional.interpolate(self.embedding,H)
+            emb = emb.expand(B, -1,-1,-1)
+            y = torch.cat([y,emb], dim=1)
+
+        attentions = torch.cat([head(y) for head in self.heads], dim=1)
+        y = self.decode(self.upsample(attentions))
         return y
 
 class MultiHeadedAttentionFast(nn.Module):
