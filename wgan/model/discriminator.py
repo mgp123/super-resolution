@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-
+import math
 from model.dimensional_layers import getConv
 
 
@@ -16,8 +16,8 @@ class DiscriminatorBlock(nn.Module):
 
         ln = nn.Identity()
         if layer_normalization:
-            ln_spatial = ceil_div(spatial_size,stride)
-            ln = nn.LayerNorm([out_channels] + [ln_spatial]*dimensions)
+            ln_spatial = [ceil_div(x, stride) for x in spatial_size]
+            ln = nn.LayerNorm([out_channels] + ln_spatial)
 
 
         self.model = nn.Sequential(
@@ -63,7 +63,7 @@ class Discriminator(nn.Module):
                 stride=2)
         )
 
-        current_spatial_size = ceil_div(current_spatial_size, 2)
+        current_spatial_size = [ceil_div(x, 2) for x in current_spatial_size]
 
         for i in range(3):
 
@@ -84,11 +84,12 @@ class Discriminator(nn.Module):
                     stride=2)
             )
 
-            current_spatial_size = ceil_div(current_spatial_size, 2)
+            current_spatial_size = [ceil_div(x, 2) for x in current_spatial_size]
             current_in_channels = current_in_channels*2
 
         layers.append(torch.nn.Flatten())
-        layers.append(nn.Linear(current_in_channels*(current_spatial_size**dimensions), 1024))
+
+        layers.append(nn.Linear(current_in_channels*(math.prod(current_spatial_size)), 1024))
         layers.append(torch.nn.LeakyReLU())
         layers.append(nn.Linear(1024, 1))
         

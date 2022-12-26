@@ -2,7 +2,7 @@ from os import makedirs
 from os.path import exists
 import torch
 from tqdm import tqdm
-from data_loader import get_data_loaders, get_data_loaders_dummy, low_pass_filter
+from data_loader import VideoDataset, generic_loaders, get_data_loaders, get_data_loaders_dummy, low_pass_filter
 from model.discriminator import Discriminator
 from model.generator import Generator
 from torch.utils.tensorboard import SummaryWriter
@@ -17,6 +17,14 @@ def freeze_network(m):
 def unfreeze_network(m):
     for p in m.parameters():
         p.requires_grad = True
+
+def mean_and_blurr(kernel_size=19):
+    def res(x):
+        y = torch.mean(x,dim=1)
+        y = torchvision.transforms.functional.gaussian_blur(y,kernel_size)
+        y = y.unsqueeze(1)
+        return y
+    return res
 
 def get_low_resolution_method(**kwargs):
 
@@ -33,13 +41,14 @@ def get_low_resolution_method(**kwargs):
         return low_pass_filter(x, **kwargs)
 
 def train():
-    batch_size = 32
-    spatial_size = 64
-    in_channels = 3
+    batch_size = 16
+    spatial_size = (10,40,40)
+    in_channels = 1
+    out_channels=3
     learning_rate = 1e-4
     initial_epoch = 0
-    epochs = 1
-    epochs_per_checkpoint = 1
+    epochs = 40
+    epochs_per_checkpoint = 20
     write_loss_every = batch_size*4
     seen_samples = 0
     coefficient_perceptual_loss = 8e-1
@@ -47,21 +56,22 @@ def train():
     low_pass_filter_cut_bin = 5
     device = "cuda:0"
     discriminator_iterations_per_batch = 3
-
+    model_name = "trainning_video"
     makedirs("runs", exist_ok=True)
     makedirs("saved_weights", exist_ok=True)
 
-    writer = SummaryWriter(log_dir="runs/training2")
+    writer = SummaryWriter(log_dir=f"runs/{model_name}")
     scaler = torch.cuda.amp.GradScaler()
-    dimension = 2
+    dimension = 3
 
     g = Generator(
         dimension,
         in_channels=in_channels,
+        out_channels=out_channels,
         n_dense_blocks=8,
         layers_per_dense_block=6
     )
-    d = Discriminator(dimension,in_channels=in_channels, spatial_size=spatial_size)
+    d = Discriminator(dimension,in_channels=out_channels, spatial_size=spatial_size)
 
 
     g = g.to(device)
@@ -75,10 +85,12 @@ def train():
         d.parameters(),
         learning_rate,
     )
-    low_resolution_method = get_low_resolution_method(spatial_size=spatial_size)
+    low_resolution_method = mean_and_blurr(kernel_size=21)
 
-    if exists("saved_weights/trainning2.model"):
-        save = torch.load("saved_weights/trainning2.model")
+    # low_resolution_method = get_low_resolution_method(spatial_size=spatial_size)
+
+    if exists(f"saved_weights/{model_name}.model"):
+        save = torch.load(f"saved_weights/{model_name}.model")
         g.load_state_dict(save['generator_dict'])
         d.load_state_dict(save['discriminator_dict'])
         optimizer_d.load_state_dict(save['discriminator_optimizer'])
@@ -88,8 +100,16 @@ def train():
         del save
 
 
+    
 
-    data_loader_train, data_loader_test = get_data_loaders(batch_size, dimension, spatial_size)
+    video_paths = "local/scenes"
+    crop_size = spatial_size[1]
+    frames = spatial_size[0]
+    data_loader_train, data_loader_test = generic_loaders(
+        VideoDataset(video_paths=video_paths,crop_size=crop_size,frames_size=frames),
+         batch_size)
+
+    # data_loader_train, data_loader_test = get_data_loaders(batch_size, dimension, spatial_size)
 
     for epoch in tqdm(range(initial_epoch, epochs), initial=initial_epoch, total=epochs, desc="epoch"):
         for samples_hr, _ in tqdm(data_loader_train, leave=False, desc="batch"):
@@ -97,6 +117,7 @@ def train():
             samples_lr = low_resolution_method(samples_hr)
 
             # samples_lr = low_resolution_method(samples_hr, cut_bin=low_pass_filter_cut_bin)
+
 
             optimizer_g.zero_grad()
             optimizer_d.zero_grad()
@@ -177,7 +198,7 @@ def train():
             "discriminator_optimizer": optimizer_d.state_dict(),
             "generator_optimizer": optimizer_g.state_dict(),
             }, 
-            "saved_weights/trainning2.model"
+            f"saved_weights/{model_name}.model"
             )
 
 train()

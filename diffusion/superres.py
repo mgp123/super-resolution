@@ -39,7 +39,7 @@ d = Diffusion(
 # plt.plot(vs)
 # plt.show()
 # 1/0
-path = "saved_weights/sr_2_scales_128_channels_fc_embeddings_64_dim_positional_16_patch_attention_12_heads_64_to_128_slow_attention.model"
+path = "saved_weights/sr_2_scales_128_channels_2_channel_multiplier_fc_embeddings_64_dim_positional_16_patch_attention_12_heads_64_to_128_slow_attention.model"
 d = Diffusion.load(path)
 # if exists(path):
 #     save = torch.load(path)
@@ -90,12 +90,12 @@ def denioise(low_res_image, init_t=max_t, step=1, end=0):
 
             noise = torch.randn_like(image)
             # image = image + torch.sqrt(1-variance_prev)*noise
-            noise_mult = 1
+            noise_mult = 0.0
             # image = denoised_1_pass* torch.sqrt(variance_prev)  + torch.sqrt(1-variance_prev)*noise*coef*noise_mult
             image = image + torch.sqrt(beta)*noise*coef*noise_mult
 
             # clipping to help remove some of the estimate error for x_{t-1}
-            clip_power = torch.sqrt(variance_prev) # +  2*torch.sqrt(1-variance_prev) +  torch.sqrt(beta)*coef
+            clip_power = torch.sqrt(variance_prev)  +  0.5*torch.sqrt(1-variance_prev) +  torch.sqrt(beta)*coef
             
             image = torch.clip(image, min=-clip_power, max=clip_power)
 
@@ -124,7 +124,7 @@ sample_image = torchvision.io.read_image(path)/255
 sample_image, _ = next(iter(data_loader_test))
 sample_image  = sample_image[0]
 sample_image = (sample_image*2) - 1
-for spatial_dim, low_dim in [(256,128)]:
+for spatial_dim, low_dim in [(128,64)]:
     print(spatial_dim)
     print(torch.min(sample_image))
     print(torch.max(sample_image))
@@ -135,7 +135,7 @@ for spatial_dim, low_dim in [(256,128)]:
 
     sample_image.unsqueeze_(0)
     sample_image = sample_image.to("cuda:0")
-    sr = denioise(sample_image, step=1, init_t=999, end=0).to("cuda:0")
+    sr = denioise(sample_image, step=2, init_t=999, end=0).to("cuda:0")
 
     images = torch.stack([hr,sample_image[0], sr])
 

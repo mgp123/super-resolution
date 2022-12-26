@@ -6,7 +6,7 @@ from model.compressor import Compressor
 from model.dimensional_layers import getConv
 
 class Generator(nn.Module):
-    def __init__(self, dimensions, in_channels, n_dense_blocks, layers_per_dense_block, out_channels_per_layer_dense=12):
+    def __init__(self, dimensions, in_channels, out_channels, n_dense_blocks, layers_per_dense_block, out_channels_per_layer_dense=12):
         super(Generator, self).__init__()
         dense_blocks = []
         compressors = []
@@ -39,7 +39,7 @@ class Generator(nn.Module):
         self.reconstruction = getConv(
                     dimensions,
                     in_channels=in_channels_compressor,
-                    out_channels=in_channels,
+                    out_channels=out_channels,
                     kernel_size=1,
                 )
 

@@ -50,6 +50,7 @@ class AttentionHead(nn.Module):
         # affinity = affinity.repeat_interleave(2, dim=2).repeat_interleave(2, dim=3)
 
         affinity = affinity.view(B,H*W,H*W)
+
         V = V.view(B,D,H*W)
         V = torch.transpose(V, 1, 2)
 
