@@ -7,7 +7,8 @@ import torchvision
 vgg = torchvision.models.vgg16(pretrained=True)
 vgg.classifier = vgg.classifier[:-1]
 vgg.eval()
-
+vgg = vgg.to("cuda:0")
+vgg = vgg.requires_grad_(False)
 class ImageGenerator(Generator):
     def __init__(self, n_dense_blocks, layers_per_dense_block, out_channels_per_layer_dense=12):
         super(ImageGenerator,self).__init__(2, 3, 3, n_dense_blocks, layers_per_dense_block, out_channels_per_layer_dense)

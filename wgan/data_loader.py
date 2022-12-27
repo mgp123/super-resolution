@@ -23,23 +23,23 @@ def low_pass_filter(x: torch.Tensor, cut_bin=20):
     return torch.fft.ifftn(fftn, dim=[-3,-2,-1]).real
 
 # slightly modified version of the one used in another project 
-def get_data_loaders(batch_size: int, dimension: int, slice_size: int = 40, random_crop:bool=True) -> Tuple[data.DataLoader, data.DataLoader]:
-    if not exists("dataset"):
-        raise Exception("No dataset found. You need to put your directory with the images inside the dataset "
+def get_data_loaders(batch_size: int, dimension: int, slice_size: int = 40, random_crop:bool=True, dataset_path="dataset") -> Tuple[data.DataLoader, data.DataLoader]:
+    if not exists(dataset_path):
+        raise Exception(f"No {dataset_path} found. You need to put your directory with the images inside the dataset "
                         "directory")
     t = transforms.ToTensor()
     if random_crop:                
         t = transforms.Compose(
             [
                 transforms.ToTensor(), 
-                transforms.RandomCrop(size=(slice_size,)*dimension),
+                # transforms.RandomCrop(size=(slice_size,)*dimension),
 
-                #transforms.RandomCrop(size=(([slice_size]*dimension))),
+                transforms.RandomCrop(size=(slice_size)),
             ]
             )
 
 
-    dataset = datasets.ImageFolder("dataset", t)
+    dataset = datasets.ImageFolder(dataset_path, t)
     test_set_size = 4
     test_set, train_set = data.random_split(
         dataset,
@@ -202,5 +202,3 @@ class VideoDataset(Dataset):
 
 
         
-
- 

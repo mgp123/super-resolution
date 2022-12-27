@@ -9,6 +9,8 @@ from torch.utils.tensorboard import SummaryWriter
 import torch.autograd
 import torchvision
 
+from model.image_model import ImageDiscriminator, ImageGenerator
+
 
 def freeze_network(m):
     for p in m.parameters():
@@ -23,6 +25,7 @@ def mean_and_blurr(kernel_size=19):
         y = torch.mean(x,dim=1)
         y = torchvision.transforms.functional.gaussian_blur(y,kernel_size)
         y = y.unsqueeze(1)
+        y = y.expand((-1,3,-1,-1))
         return y
     return res
 
@@ -42,13 +45,13 @@ def get_low_resolution_method(**kwargs):
 
 def train():
     batch_size = 16
-    spatial_size = (10,40,40)
+    spatial_size = (128,128)
     in_channels = 1
     out_channels=3
     learning_rate = 1e-4
     initial_epoch = 0
-    epochs = 40
-    epochs_per_checkpoint = 20
+    epochs = 10
+    epochs_per_checkpoint = 5
     write_loss_every = batch_size*4
     seen_samples = 0
     coefficient_perceptual_loss = 8e-1
@@ -56,22 +59,19 @@ def train():
     low_pass_filter_cut_bin = 5
     device = "cuda:0"
     discriminator_iterations_per_batch = 3
-    model_name = "trainning_video"
+    model_name = "trainning_frames"
     makedirs("runs", exist_ok=True)
     makedirs("saved_weights", exist_ok=True)
 
     writer = SummaryWriter(log_dir=f"runs/{model_name}")
     scaler = torch.cuda.amp.GradScaler()
-    dimension = 3
+    dimension = 2
 
-    g = Generator(
-        dimension,
-        in_channels=in_channels,
-        out_channels=out_channels,
+    g = ImageGenerator(
         n_dense_blocks=8,
         layers_per_dense_block=6
     )
-    d = Discriminator(dimension,in_channels=out_channels, spatial_size=spatial_size)
+    d = ImageDiscriminator(spatial_size)
 
 
     g = g.to(device)
@@ -85,7 +85,7 @@ def train():
         d.parameters(),
         learning_rate,
     )
-    low_resolution_method = mean_and_blurr(kernel_size=21)
+    low_resolution_method = mean_and_blurr(kernel_size=7)
 
     # low_resolution_method = get_low_resolution_method(spatial_size=spatial_size)
 
@@ -102,15 +102,15 @@ def train():
 
     
 
-    video_paths = "local/scenes"
-    crop_size = spatial_size[1]
-    frames = spatial_size[0]
-    data_loader_train, data_loader_test = generic_loaders(
-        VideoDataset(video_paths=video_paths,crop_size=crop_size,frames_size=frames),
-         batch_size)
+    # video_paths = "local/scenes"
+    # crop_size = spatial_size[1]
+    # frames = spatial_size[0]
+    # data_loader_train, data_loader_test = generic_loaders(
+    #     VideoDataset(video_paths=video_paths,crop_size=crop_size,frames_size=frames),
+    #      batch_size)
 
-    # data_loader_train, data_loader_test = get_data_loaders(batch_size, dimension, spatial_size)
-
+    data_loader_train, data_loader_test = get_data_loaders(batch_size, dimension, spatial_size,dataset_path="local/frames")
+    print(len(data_loader_train))
     for epoch in tqdm(range(initial_epoch, epochs), initial=initial_epoch, total=epochs, desc="epoch"):
         for samples_hr, _ in tqdm(data_loader_train, leave=False, desc="batch"):
             samples_hr = samples_hr.to(device)
