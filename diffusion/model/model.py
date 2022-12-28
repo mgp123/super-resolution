@@ -73,6 +73,52 @@ class PositionalEmbeddings2dGrid():
 
             return space_embedding
 
+# aproxmiate version of BigGan residual block
+class BigGanResidual(nn.Module):
+    def __init__(self, in_channels, out_channels, stride=1, normalization=True):
+        super(BigGanResidual, self).__init__()
+
+        self.scale = nn.Identity()
+        if stride < 0:
+            stride = abs(stride)
+            self.scale = nn.Upsample(scale_factor=stride)
+
+        elif stride > 1:
+            self.scale = nn.AvgPool2d(kernel_size=stride, stride=stride)
+
+        self.branch = nn.Sequential(
+            nn.GroupNorm(32,in_channels),         
+            nn.LeakyReLU(),
+            self.scale,
+            nn.Conv2d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=3,
+                padding=1
+            ),
+            nn.GroupNorm(32,out_channels),         
+            nn.LeakyReLU(),
+            nn.Conv2d(
+                in_channels=out_channels,
+                out_channels=out_channels,
+                kernel_size=3,
+                padding=1
+
+            )
+        )
+
+        self.skip = nn.Sequential(
+            self.scale,
+            nn.Conv2d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=1,
+            )
+        )
+
+    def forward(self, x):
+        return  self.branch(x) + self.skip(x)*(2**-0.5) 
+        
 class ConvLayer(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1, normalization=True):
         super(ConvLayer, self).__init__()
@@ -116,11 +162,11 @@ class DownwardBlock(nn.Module):
 
         stride = -stride
         if is_long:
-            self.long = ConvLayer(in_channels,out_channels) 
+            self.long = BigGanResidual(in_channels,out_channels) 
             stride = -stride
  
-        self.right = ConvLayer(in_channels,out_channels, stride=stride) 
-        self.down = ConvLayer(in_channels,in_channels)
+        self.right = BigGanResidual(in_channels,out_channels, stride=stride) 
+        self.down = BigGanResidual(in_channels,in_channels)
 
 
 
@@ -139,10 +185,10 @@ class RightwardBlock(nn.Module):
         stride = -stride
 
         if is_long:
-            self.long = ConvLayer(in_channels,out_channels) 
+            self.long = BigGanResidual(in_channels,out_channels) 
             stride = -stride
 
-        self.right = ConvLayer(in_channels,out_channels, stride=stride) 
+        self.right = BigGanResidual(in_channels,out_channels, stride=stride) 
 
 
     def forward(self, x):
@@ -197,7 +243,8 @@ class Diffusion(nn.Module):
         attention_channels=16, 
         attention_heads=2,
         attention_patch=1,
-        learned_embedding=False):
+        learned_embedding=False,
+        constant_stide_layers=0):
         super(Diffusion, self).__init__()
         self.out_channels = out_channels
         self.learned_embedding = learned_embedding
@@ -218,6 +265,8 @@ class Diffusion(nn.Module):
         for c in channel_multiplier:
             mid_channels *= c
 
+        self.attention_type = attention_type
+
         
         if attention_type == "fast":
             self.attention = MultiHeadedAttentionFast(in_channels=(mid_channels+2*d), value_channels=attention_channels, out_channels=mid_channels, n_heads=attention_heads)
@@ -229,8 +278,10 @@ class Diffusion(nn.Module):
                 n_heads=attention_heads,
                 patch_size=attention_patch,
                 learned_embedding=learned_embedding)
+        elif attention_type == "none":
+            pass
         else:
-            raise ValueError("attention type must be slow or fast")
+            raise ValueError("attention type must be slow, fast or none")
 
 
         downscale_blocks = []
@@ -244,13 +295,13 @@ class Diffusion(nn.Module):
                     in_channels=i_channels,
                     out_channels=i_channels*channel_multiplier[i] if i < (n_scales) else i_channels,
                     is_long=True,
-                    stride=2 if i < n_scales -1 else 1,
+                    stride=2 if i < n_scales -1 - constant_stide_layers else 1,
                     ))
             upscale_blocks.append(
                 DiffusionBlock(
                     in_channels=i_channels*channel_multiplier[i] if i < (n_scales) else i_channels,
                     out_channels=i_channels,
-                    stride=2 if i > 0 else 1,
+                    stride=2 if i > constant_stide_layers else 1,
                     is_long=False,
                     )
                 )
@@ -285,20 +336,21 @@ class Diffusion(nn.Module):
         # space_embedding = self.pe2d.get(torch.arange(H*W),C) 
         # space_embedding = space_embedding.view(1,H, W, C).permute((0,3,1,2))
         # space_embedding = space_embedding.to(x.device)
-        if not self.learned_embedding:
-            space_embedding = self.pe2d.get(H,W,4, r1.device) 
+        if self.attention_type != "none":
+            if not self.learned_embedding:
+                space_embedding = self.pe2d.get(H,W,4, r1.device) 
 
-            # r1 = (self.attention(r1+space_embedding) )
-            # r2 = (self.attention(r2+space_embedding) )
-            space_embedding = space_embedding.expand(B, -1,-1,-1)
-            s1 = torch.cat([r1,space_embedding],dim=1)
-            s2 = torch.cat([r2,space_embedding],dim=1)
-        else:
-            s1 = r1
-            s2 = r2
+                # r1 = (self.attention(r1+space_embedding) )
+                # r2 = (self.attention(r2+space_embedding) )
+                space_embedding = space_embedding.expand(B, -1,-1,-1)
+                s1 = torch.cat([r1,space_embedding],dim=1)
+                s2 = torch.cat([r2,space_embedding],dim=1)
+            else:
+                s1 = r1
+                s2 = r2
 
-        r1.add_(self.attention(s1) )
-        r2.add_(self.attention(s2) )
+            r1.add_(self.attention(s1) )
+            r2.add_(self.attention(s2) )
 
         # r1.add_(self.attention(r1+space_embedding) )
         # r2.add_(self.attention(r2+space_embedding) )
@@ -325,7 +377,8 @@ class Diffusion(nn.Module):
                     attention_channels=parameters.get("attention_channels",64),
                     attention_heads=parameters.get("attention_heads",12),
                     attention_patch=parameters.get("attention_patch",16),
-                    learned_embedding=parameters.get("learned_embedding",True)
+                    learned_embedding=parameters.get("learned_embedding",True),
+                    constant_stide_layers=parameters.get("constant_stide_layers",0),
             )
             d.load_state_dict(save['diffusion_dict'])
             del save

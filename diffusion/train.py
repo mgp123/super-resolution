@@ -26,16 +26,17 @@ def variance_scheudle(t, max_t):
 
 
 def train():
-    batch_size = 16
+    batch_size = 8
     in_channels = 3
     hidden_channels = 128
-    channel_multiplier = 2
-    n_scales = 2
-    attention_channels=64
+    channel_multiplier = [2,2,1]
+    constant_stide_layers = 0
+    n_scales = 3
+    attention_channels=32
     attention_heads=12
     attention_patch=16
     learned_embedding=True
-    attention_type = "slow"
+    attention_type = "none"
     max_t = 1000
     learning_rate = 1e-5
     spatial_dim = 128
@@ -49,7 +50,7 @@ def train():
     seen_samples = 0
     device = "cuda:0"
     
-    model_name = f"sr_{n_scales}_scales_{hidden_channels}_channels_{channel_multiplier}_channel_multiplier_fc_embeddings_{attention_channels}_dim_positional_{attention_patch}_patch_attention_{attention_heads}_heads_{low_dim}_to_{spatial_dim}_{attention_type}_attention"
+    model_name = f"big_gan_res_sr_{n_scales}_scales_{hidden_channels}_channels_{channel_multiplier}_channel_multiplier_fc_embeddings_{attention_channels}_dim_positional_{attention_patch}_patch_attention_{attention_heads}_heads_{low_dim}_to_{spatial_dim}_{attention_type}_attention"
     model_path = "saved_weights/" + model_name + ".model"
     makedirs("runs", exist_ok=True)
     makedirs("saved_weights", exist_ok=True)
@@ -58,21 +59,22 @@ def train():
     writer = SummaryWriter(log_dir="runs/" + model_name)
     scaler = torch.cuda.amp.GradScaler()
 
-    try:
+    if exists(model_path):
         d = Diffusion.load(model_path)
         print("loaded from checkpoint")
-    except:
+    else:
         d = Diffusion(
-            in_channels=in_channels*2,
-            hidden_channels=hidden_channels,
-            out_channels = in_channels,
-            n_scales=n_scales,
-            attention_type=attention_type,
-            channel_multiplier=channel_multiplier,
-            attention_channels=attention_channels,
-            attention_heads=attention_heads,
-            attention_patch=attention_patch,
-            learned_embedding=learned_embedding
+                in_channels=in_channels*2,
+                hidden_channels=hidden_channels,
+                out_channels = in_channels,
+                n_scales=n_scales,
+                attention_type=attention_type,
+                channel_multiplier=channel_multiplier,
+                attention_channels=attention_channels,
+                attention_heads=attention_heads,
+                attention_patch=attention_patch,
+                learned_embedding=learned_embedding,
+                constant_stide_layers=constant_stide_layers
         )
     d = d.to(device)
 
@@ -93,7 +95,7 @@ def train():
 
     data_loader_train, data_loader_test = get_data_loaders(batch_size, spatial_dim)
     variance_scheudle_progressive_alpha = 1*max_t/len(data_loader_train)
-    # variance_scheudle_progressive_alpha = max_t-1
+    variance_scheudle_progressive_alpha = max_t-1
     t_cap2 = 1
 
     for epoch in tqdm(range(initial_epoch, epochs), initial=initial_epoch, total=epochs, desc="epoch"):
@@ -105,13 +107,20 @@ def train():
             low_res = upsize(downsize(samples))
 
             
-            t_cap = int(max(1, min(max_t-1, variance_scheudle_progressive_alpha* (seen_samples//batch_size) )))
+            t_cap = int(max(1, min(max_t-1, variance_scheudle_progressive_alpha* ( (seen_samples//batch_size)  + 1) )))
 
-            t = torch.randint(1, t_cap+1, (samples.shape[0],))
+            t = torch.randint(2, t_cap+1, (samples.shape[0],),dtype=torch.int32)
             optimizer_d.zero_grad()
 
             with torch.cuda.amp.autocast():
-                variance = variance_scheudle(t, max_t).view(-1,1,1,1).to(device)
+                variance = variance_scheudle(t, max_t)
+                variance_prev = variance_scheudle(t-1, max_t)
+                u = torch.rand(t.shape)
+                variance = variance*u + variance_prev * (1-u)
+
+                variance = variance.view(-1,1,1,1).to(device)
+
+
                 noise = torch.randn_like(samples)
                 noisy_image = samples * torch.sqrt(variance) + noise * torch.sqrt(1-variance)
 
@@ -145,7 +154,8 @@ def train():
                     "attention_channels":attention_channels,
                     "attention_heads":attention_heads,
                     "attention_patch":attention_patch,
-                    "learned_embedding":learned_embedding
+                    "learned_embedding":learned_embedding,
+                    "constant_stide_layers":constant_stide_layers
                     }
                 }, 
             model_path
