@@ -6,7 +6,7 @@ class Block(nn.Module):
     def __init__(self, in_channels, out_channels, group_norm=32) -> None:
         super(Block, self).__init__()
 
-        print(f"block: in_channels {in_channels}, out_channels {out_channels} ")
+        # print(f"block: in_channels {in_channels}, out_channels {out_channels} ")
 
         self.model = nn.Sequential(
             nn.GroupNorm(group_norm,in_channels),
