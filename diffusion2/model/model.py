@@ -2,27 +2,23 @@ import math
 import torch
 from torch import nn
 import pytorch_lightning as pl
+from model.residual_block import Block, ResidualBlock, ResidualBlockDown, ResidualBlockUp
 
 from model.big_gan_residual import BigGanResidualDown, BigGanResidualSame, BigGanResidualUp
 
 class VarianceEmbedding(pl.LightningModule):
-    def __init__(self, embedding_shape):
+    def __init__(self, embedding_size):
         super(VarianceEmbedding, self).__init__()
-        self.embedding_shape = embedding_shape
+        self.embedding_size = embedding_size
 
-        flat_dim = 1
-        for k in embedding_shape:
-            flat_dim *= k
-
-    
         self.model = nn.Sequential(
-            nn.Linear(1,flat_dim),
-            nn.ReLU()
+            nn.Linear(1,embedding_size*4),
+            nn.SiLU(),
+            nn.Linear(embedding_size*4,embedding_size),
+
         )
     def forward(self, x):
-        y = self.model(x)
-        y = y.view(y.shape[0],1,*self.embedding_shape )
-        return y
+        return self.model(x)
 
 
 class Diffusion(pl.LightningModule):
@@ -32,7 +28,6 @@ class Diffusion(pl.LightningModule):
         hidden_channels, 
         out_channels, 
         scales, 
-        variance_embedding_shape=(64,64),
         same_dimension_blocks = 0):
         super(Diffusion, self).__init__()
         self.save_hyperparameters()
@@ -45,71 +40,72 @@ class Diffusion(pl.LightningModule):
         self.initial_transform = nn.Conv2d(
             in_channels=in_channels, 
             out_channels=hidden_channels,
-            kernel_size=1)
+            kernel_size=3,
+            padding=1)
+
+        self.v_embedding = VarianceEmbedding(hidden_channels)
 
         in_blocks = []
-        variance_embedding_in = []
         out_blocks = []
-        variance_embedding_out = []
 
         current_channels = hidden_channels
 
         for _ in range(scales):
-            in_blocks.append(BigGanResidualDown(current_channels))
-            out_blocks.append(BigGanResidualUp(current_channels*2))
+            in_blocks.append(
+                ResidualBlockDown(
+                    in_channels= current_channels,
+                    out_channels=current_channels*2,
+                    embedding_size=hidden_channels
+                    ))
+            out_blocks.append(
+                ResidualBlockUp(
+                    in_channels= current_channels*2*2,
+                    out_channels=current_channels,
+                    embedding_size=hidden_channels
+                    ))
+
             current_channels = 2*current_channels
 
-            variance_embedding_in.append(
-                VarianceEmbedding(variance_embedding_shape)
-            )
-            variance_embedding_out.append(
-                    VarianceEmbedding(variance_embedding_shape)
-                )
 
         for _ in range(same_dimension_blocks):
-            in_blocks.append(BigGanResidualSame(current_channels))
-            out_blocks.append(BigGanResidualSame(current_channels))
-        
-            variance_embedding_in.append(
-                    VarianceEmbedding(variance_embedding_shape)
-                )
-            variance_embedding_out.append(
-                    VarianceEmbedding(variance_embedding_shape)
-                )
+            in_blocks.append(ResidualBlock(
+                in_channels=current_channels,
+                out_channels=current_channels,
+                embedding_size=hidden_channels
+                ))
+            out_blocks.append(ResidualBlock(
+                in_channels=current_channels*2,
+                out_channels=current_channels,
+                embedding_size=hidden_channels
+                ))
 
-
-        variance_embedding_out.reverse()
         out_blocks.reverse()
 
         self.in_blocks = nn.ModuleList(in_blocks)
         self.out_blocks = nn.ModuleList(out_blocks)
 
-        self.variance_embedding_in = nn.ModuleList(variance_embedding_in)
-        self.variance_embedding_out = nn.ModuleList(variance_embedding_out)
 
-        self.final_transform = nn.Conv2d(
+        self.final_transform = Block(
             in_channels=hidden_channels, 
             out_channels=out_channels,
-            kernel_size=1)
+            )
 
     def forward(self, x, v):
         residuals = []
         y = self.initial_transform(x)
+        v_emv = self.v_embedding(v)
 
-        for m, v_f in zip(self.in_blocks,self.variance_embedding_in):
-            v_emv = v_f(v)
-            v_emv = torch.nn.functional.interpolate(v_emv, size=y.shape[-2:])
-            y = m(y + v_emv*(2**(-0.5)))
+
+        for m in (self.in_blocks):
+            y = m(y, v_emv)
 
             residuals.append(y)
 
         residuals.reverse()
 
-        for m, residual, v_f in zip(self.out_blocks, residuals,self.variance_embedding_out):
-            v_emv = v_f(v)
-            v_emv = torch.nn.functional.interpolate(v_emv, size=y.shape[-2:])
-
-            y = m(y + (residual + v_emv) *(2**(-0.5)))
+        for m, residual in zip(self.out_blocks, residuals):
+            y = torch.cat([y,residual],dim=1)
+            y = m(y, v_emv)
         
         return self.final_transform(y)
 

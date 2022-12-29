@@ -23,7 +23,7 @@ def variance_scheudle(t, max_t):
 
     return torch.tensor((t_value/base))
 
-ckpt_file_path = "runs/big_gan_diffusion/version_16/checkpoints/epoch=1-step=4374.ckpt"
+ckpt_file_path = "runs/big_gan_diffusion/version_1/checkpoints/epoch=5-step=13122.ckpt"
 
 # d = Diffusion(in_channels=6, out_channels=3, hidden_channels=32,scales=2)
 d = Diffusion.load_from_checkpoint(ckpt_file_path)
