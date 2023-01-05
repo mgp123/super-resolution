@@ -36,7 +36,7 @@ def train():
     attention_heads=12
     attention_patch=16
     learned_embedding=True
-    attention_type = "none"
+    attention_type = "slow"
     max_t = 1000
     learning_rate = 1e-5
     spatial_dim = 128

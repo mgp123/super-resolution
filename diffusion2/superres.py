@@ -23,7 +23,7 @@ def variance_scheudle(t, max_t):
 
     return torch.tensor((t_value/base))
 
-ckpt_file_path = "runs/big_gan_diffusion/version_1/checkpoints/epoch=5-step=13122.ckpt"
+ckpt_file_path = "runs/big_gan_diffusion/version_27/checkpoints/epoch=0-step=4374.ckpt"
 
 # d = Diffusion(in_channels=6, out_channels=3, hidden_channels=32,scales=2)
 d = Diffusion.load_from_checkpoint(ckpt_file_path)
@@ -37,6 +37,7 @@ imgs = []
 # image = torch.randn((4,3,spatial_dim,spatial_dim)).to("cuda:0")
 def denioise(low_res_image, init_t=max_t, step=1, end=0):
     image = torch.randn_like(low_res_image)
+    # low_res_image = low_res_image*0.5 + 1
     # variance = variance_scheudle(init_t, max_t).to("cuda:0")
 
     # # proxy for noisy high res
@@ -54,30 +55,32 @@ def denioise(low_res_image, init_t=max_t, step=1, end=0):
                 variance_prev = variance_prev*0 + 1
                 coef = 0
             alpha = variance/variance_scheudle(max(t-1,1), max_t)
-            beta = torch.clip(1 - alpha, max=0.999)
+            beta = torch.clip(1 - alpha, max=0.99)
             
             noise_estimate = d(torch.cat([image, low_res_image],dim=1), torch.tensor(variance).view(1,1).to("cuda:0"))
             denoised_1_pass = (image -  noise_estimate * torch.sqrt(1-variance) ) * torch.sqrt(1.0/variance)
             image = (image -  noise_estimate * beta * torch.sqrt(1.0/(1-variance)) )  * torch.sqrt(1.0/alpha) 
 
-            denoised_1_pass = torch.clip(denoised_1_pass, min=-1, max=1)
+            denoised_1_pass = torch.clip(denoised_1_pass, min=0, max=1)
 
             if t % 1 == 0:
 
-                image_grid = make_grid(0.5*(denoised_1_pass.cpu()+1), nrow=1)
+                image_grid = make_grid((denoised_1_pass.cpu()), nrow=1)
                 imgs.append(toPil(image_grid))
 
 
             noise = torch.randn_like(image)
             # image = image + torch.sqrt(1-variance_prev)*noise
-            noise_mult = 0.1
-            # image = denoised_1_pass* torch.sqrt(variance_prev)  + torch.sqrt(1-variance_prev)*noise*coef*noise_mult
+            noise_mult = 0.0
+            #image = denoised_1_pass* torch.sqrt(variance_prev)  + torch.sqrt(1-variance_prev)*noise*coef*noise_mult
+            # image = torch.clip(image, min=0, max=.9)
+
             image = image + torch.sqrt(beta)*noise*coef*noise_mult
 
             # clipping to help remove some of the estimate error for x_{t-1}
             clip_power = torch.sqrt(variance_prev)  +  0.5*torch.sqrt(1-variance_prev) +  torch.sqrt(beta)*coef
+            # image = torch.clip(image, min=-clip_power, max=1+clip_power)
             
-            image = torch.clip(image, min=-clip_power, max=clip_power)
 
     denoised = image
 
@@ -93,7 +96,7 @@ def denioise(low_res_image, init_t=max_t, step=1, end=0):
     # noise_estimate = d(torch.cat([image, low_res_image],dim=1), torch.tensor(variance_scheudle(1,max_t)).view(1,1).to("cuda:0"))
     # denoised = (image -  noise_estimate * torch.sqrt(1-variance) ) * torch.sqrt(1.0/variance)
 
-    return (ToTensor()(img)*2 - 1)
+    return ToTensor()(img)
 
 
 
@@ -103,8 +106,8 @@ data_loader_train, data_loader_test = get_data_loaders(4, 256)
 
 sample_image, _ = next(iter(data_loader_test))
 sample_image  = sample_image[0]
-sample_image = (sample_image*2) - 1
-for spatial_dim, low_dim in [(128,64)]:
+# sample_image = (sample_image*2) - 1
+for spatial_dim, low_dim in [(256,128)]:
     print(spatial_dim)
     print(torch.min(sample_image))
     print(torch.max(sample_image))
@@ -115,7 +118,7 @@ for spatial_dim, low_dim in [(128,64)]:
 
     sample_image.unsqueeze_(0)
     sample_image = sample_image.to("cuda:0")
-    sr = denioise(sample_image, step=1, init_t=999, end=0).to("cuda:0")
+    sr = denioise(sample_image, step=5, init_t=999, end=0).to("cuda:0")
 
     images = torch.stack([hr,sample_image[0], sr])
 
@@ -123,7 +126,7 @@ for spatial_dim, low_dim in [(128,64)]:
     toPil = ToPILImage()
 
     image_grid = make_grid(images, nrow=3)
-    torchvision.utils.save_image(image_grid,f"sr2_{spatial_dim}.png")
+    torchvision.utils.save_image(image_grid*2-1,f"sr2_{spatial_dim}.png")
     # plt.imshow(toPil(image_grid))
     # plt.savefig(f"sr2_{spatial_dim}.png")
 

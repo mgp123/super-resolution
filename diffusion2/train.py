@@ -14,7 +14,13 @@ from typing import Tuple
 data_loader_train, data_loader_test = get_data_loaders(batch_size=16, spatial_size=128)
 
 # train
-model = Diffusion(in_channels=6, out_channels=3, hidden_channels=128,scales=3,same_dimension_blocks=1)
+model = Diffusion(
+    in_channels=6, 
+    out_channels=3, 
+    hidden_channels=128,
+    scales=(1,2,2,2,1),
+    attention=True,
+    )
 logger = pl.loggers.TensorBoardLogger("runs", name="big_gan_diffusion")
 trainer = pl.Trainer(accelerator='gpu', devices=1, logger=logger, max_epochs=2)
 

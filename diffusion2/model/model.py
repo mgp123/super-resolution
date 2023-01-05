@@ -2,6 +2,7 @@ import math
 import torch
 from torch import nn
 import pytorch_lightning as pl
+from model.self_attention import MultiHeadedAttentionSlow
 from model.residual_block import Block, ResidualBlock, ResidualBlockDown, ResidualBlockUp
 
 from model.big_gan_residual import BigGanResidualDown, BigGanResidualSame, BigGanResidualUp
@@ -28,7 +29,8 @@ class Diffusion(pl.LightningModule):
         hidden_channels, 
         out_channels, 
         scales, 
-        same_dimension_blocks = 0):
+        attention=False,
+        ):
         super(Diffusion, self).__init__()
         self.save_hyperparameters()
 
@@ -50,45 +52,60 @@ class Diffusion(pl.LightningModule):
 
         current_channels = hidden_channels
 
-        for _ in range(scales):
-            in_blocks.append(
-                ResidualBlockDown(
-                    in_channels= current_channels,
-                    out_channels=current_channels*2,
-                    embedding_size=hidden_channels
-                    ))
-            out_blocks.append(
-                ResidualBlockUp(
-                    in_channels= current_channels*2*2,
+        for s in (scales):
+            if s > 1:
+                in_blocks.append(
+                    BigGanResidualDown(
+                        in_channels= current_channels,
+                        out_channels=current_channels*s,
+                        embedding_size=hidden_channels
+                        ))
+                out_blocks.append(
+                    BigGanResidualUp(
+                        in_channels= current_channels*s*2,
+                        out_channels=current_channels,
+                        embedding_size=hidden_channels
+                        ))
+            elif s == 1:
+                in_blocks.append(BigGanResidualSame(
+                    in_channels=current_channels,
                     out_channels=current_channels,
                     embedding_size=hidden_channels
                     ))
+                out_blocks.append(BigGanResidualSame(
+                    in_channels=current_channels*2,
+                    out_channels=current_channels,
+                    embedding_size=hidden_channels
+                    ))
+            else:
+                raise ValueError(f"Can only handle scales bigger than 0. Recieved {s}")
 
-            current_channels = 2*current_channels
+            current_channels = s*current_channels
 
 
-        for _ in range(same_dimension_blocks):
-            in_blocks.append(ResidualBlock(
-                in_channels=current_channels,
-                out_channels=current_channels,
-                embedding_size=hidden_channels
-                ))
-            out_blocks.append(ResidualBlock(
-                in_channels=current_channels*2,
-                out_channels=current_channels,
-                embedding_size=hidden_channels
-                ))
 
         out_blocks.reverse()
 
         self.in_blocks = nn.ModuleList(in_blocks)
         self.out_blocks = nn.ModuleList(out_blocks)
 
+        if attention:
+            self.attention = MultiHeadedAttentionSlow(
+                in_channels=current_channels,
+                out_channels=current_channels,
+                value_channels=current_channels,
+                n_heads=1,
+                patch_size=1
+                )
+        else:
+            self.attention = None
+  
 
         self.final_transform = Block(
             in_channels=hidden_channels, 
             out_channels=out_channels,
             )
+
 
     def forward(self, x, v):
         residuals = []
@@ -100,8 +117,10 @@ class Diffusion(pl.LightningModule):
             y = m(y, v_emv)
 
             residuals.append(y)
-
         residuals.reverse()
+
+        if self.attention is not None:
+            y = y + self.attention(y)
 
         for m, residual in zip(self.out_blocks, residuals):
             y = torch.cat([y,residual],dim=1)
@@ -117,13 +136,13 @@ class Diffusion(pl.LightningModule):
         return t_value/base
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(),lr=1e-3)
+        optimizer = torch.optim.Adam(self.parameters(),lr=2e-5)
         return optimizer
 
-    def mse_loss(self, sr, hr):
-        return torch.nn.functional.mse_loss(sr, hr)
+    def reconstruction_loss(self, sr, hr):
+        return torch.nn.functional.l1_loss(sr, hr)
     
-    def get_variance(self, shape, max_t=1000):
+    def get_variance(self, shape, max_t=1000, top_sample_step=1000):
         t = torch.randint(2, max_t+1, (shape[0],),dtype=torch.int32)
         variance = self.variance_scheudle(t, max_t)
         variance_prev = self.variance_scheudle(t-1, max_t)
@@ -149,7 +168,7 @@ class Diffusion(pl.LightningModule):
         y = torch.cat([noisy_image, lr], dim=1)
         noise_predicion = self.forward(y, variance.view(-1,1))
         
-        loss = self.mse_loss(noise_predicion, noise)
+        loss = self.reconstruction_loss(noise_predicion, noise)
         self.log('train_loss', loss)
         return loss
 
@@ -173,7 +192,7 @@ class Diffusion(pl.LightningModule):
         y = torch.cat([noisy_image, lr], dim=1)
         noise_predicion = self.forward(y, variance.view(-1,1))
         
-        loss = self.mse_loss(noise_predicion, noise)
+        loss = self.reconstruction_loss(noise_predicion, noise)
         self.log('val_loss', loss)
         return loss
 

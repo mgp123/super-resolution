@@ -9,7 +9,7 @@ from model.model import Diffusion
 from typing import Tuple
 
 def get_data_loaders(batch_size: int, spatial_size) -> Tuple[data.DataLoader, data.DataLoader]:
-    t = transforms.Compose([transforms.Resize(spatial_size) ,transforms.ToTensor()])
+    t = transforms.Compose([transforms.Resize(spatial_size) ,transforms.RandomHorizontalFlip(), transforms.ToTensor()])
     dataset = datasets.ImageFolder("dataset/", t)
     test_set_size = batch_size
     test_set, train_set = data.random_split(
