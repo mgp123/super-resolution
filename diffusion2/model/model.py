@@ -2,6 +2,7 @@ import math
 import torch
 from torch import nn
 import pytorch_lightning as pl
+from model.context_encoding import ContextEncoding
 from model.self_attention import MultiHeadedAttentionSlow
 from model.residual_block import Block, ResidualBlock, ResidualBlockDown, ResidualBlockUp
 
@@ -30,6 +31,7 @@ class Diffusion(pl.LightningModule):
         out_channels, 
         scales, 
         attention=False,
+        context_encoding="lower_resolution"
         ):
         super(Diffusion, self).__init__()
         self.save_hyperparameters()
@@ -38,6 +40,10 @@ class Diffusion(pl.LightningModule):
         self.hidden_channels = hidden_channels
         self.out_channels = out_channels
         self.scales = scales
+        if context_encoding is not None:
+            self.context_encoding = ContextEncoding(context_encoding)
+        else:
+            self.context_encoding = None
 
         self.initial_transform = nn.Conv2d(
             in_channels=in_channels, 
@@ -109,6 +115,7 @@ class Diffusion(pl.LightningModule):
 
     def forward(self, x, v):
         residuals = []
+
         y = self.initial_transform(x)
         v_emv = self.v_embedding(v)
 
@@ -129,7 +136,7 @@ class Diffusion(pl.LightningModule):
         return self.final_transform(y)
 
     def variance_scheudle(self,t,max_t=1000):
-        s = 0.01
+        s = 0.008
         base = math.cos(s*math.pi/ (2*(1+s)))
         t_value = torch.cos((t/max_t + s)*math.pi/ (2*(1+s)))
 
@@ -140,7 +147,7 @@ class Diffusion(pl.LightningModule):
         return optimizer
 
     def reconstruction_loss(self, sr, hr):
-        return torch.nn.functional.l1_loss(sr, hr)
+        return torch.nn.functional.mse_loss(sr, hr)
     
     def get_variance(self, shape, max_t=1000, top_sample_step=1000):
         t = torch.randint(2, max_t+1, (shape[0],),dtype=torch.int32)
@@ -153,19 +160,23 @@ class Diffusion(pl.LightningModule):
     def training_step(self, train_batch, batch_idx):
         hr, _ = train_batch
         hr = train_batch[0]
-        lr = torch.nn.functional.interpolate(hr, scale_factor=0.5)
-        lr = torch.nn.functional.interpolate(lr, scale_factor=2)
-        
-        variance = self.get_variance(lr.shape)
+        hr = hr*2 - 1
+
+        if self.context_encoding is not None:
+            context = self.context_encoding(hr)
+
+        variance = self.get_variance(hr.shape)
         variance = variance.to(hr.device)
 
         variance_unflat = variance.view(-1,1,1,1)
 
 
         noise = torch.randn_like(hr, device=hr.device)
-        noisy_image = hr * torch.sqrt(variance_unflat) + noise * torch.sqrt(1-variance_unflat)
+        y = hr * torch.sqrt(variance_unflat) + noise * torch.sqrt(1-variance_unflat)
 
-        y = torch.cat([noisy_image, lr], dim=1)
+        if self.context_encoding is not None:
+            y = torch.cat([y, context], dim=1)
+
         noise_predicion = self.forward(y, variance.view(-1,1))
         
         loss = self.reconstruction_loss(noise_predicion, noise)
@@ -175,10 +186,12 @@ class Diffusion(pl.LightningModule):
     def validation_step(self, val_batch, batch_idx):
         hr, _ = val_batch
         val_batch = val_batch[0]
-        lr = torch.nn.functional.interpolate(hr, scale_factor=0.5)
-        lr = torch.nn.functional.interpolate(lr, scale_factor=2)
-        
-        variance = self.get_variance(lr.shape)
+        hr = hr*2 - 1
+
+        if self.context_encoding is not None:
+            context = self.context_encoding(hr)
+
+        variance = self.get_variance(hr.shape)
         variance = variance.to(hr.device)
 
         variance_unflat = variance.view(-1,1,1,1)
@@ -187,9 +200,11 @@ class Diffusion(pl.LightningModule):
         # print(variance.device, hr.device, noise.device)
         # print()
         # print()    
-        noisy_image = hr * torch.sqrt(variance_unflat) + noise * torch.sqrt(1-variance_unflat)
-
-        y = torch.cat([noisy_image, lr], dim=1)
+        y = hr * torch.sqrt(variance_unflat) + noise * torch.sqrt(1-variance_unflat)
+        
+        if self.context_encoding is not None:
+            y = torch.cat([y, context], dim=1)
+        
         noise_predicion = self.forward(y, variance.view(-1,1))
         
         loss = self.reconstruction_loss(noise_predicion, noise)
