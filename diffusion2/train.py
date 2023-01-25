@@ -27,12 +27,11 @@ trainer = pl.Trainer(
     accelerator='gpu', 
     devices=1, 
     logger=logger, 
-    max_epochs=6, 
     )
 
 trainer.fit(
     model, 
     data_loader_train, 
     data_loader_test,
-    ckpt_path="runs/diffusion_generator/version_4/checkpoints/epoch=3-step=13122.ckpt" 
+    ckpt_path="runs/diffusion_generator/version_10/checkpoints/epoch=49-step=113724.ckpt" 
     )

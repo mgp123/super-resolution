@@ -2,6 +2,7 @@ import math
 import torch
 from torch import nn
 import pytorch_lightning as pl
+from model.backbone_blocks import BackboneBlocks
 from model.context_encoding import ContextEncoding
 from model.self_attention import MultiHeadedAttentionSlow
 from model.residual_block import Block, ResidualBlock, ResidualBlockDown, ResidualBlockUp
@@ -31,10 +32,13 @@ class Diffusion(pl.LightningModule):
         out_channels, 
         scales, 
         attention=False,
-        context_encoding="lower_resolution"
+        context_encoding="lower_resolution",
+        backbone_type="big_gan"
         ):
         super(Diffusion, self).__init__()
         self.save_hyperparameters()
+
+        backbone_blocks = BackboneBlocks(backbone_type)
 
         self.in_channels = in_channels
         self.hidden_channels = hidden_channels
@@ -61,24 +65,24 @@ class Diffusion(pl.LightningModule):
         for s in (scales):
             if s > 1:
                 in_blocks.append(
-                    BigGanResidualDown(
+                    backbone_blocks.down(
                         in_channels= current_channels,
                         out_channels=current_channels*s,
                         embedding_size=hidden_channels
                         ))
                 out_blocks.append(
-                    BigGanResidualUp(
+                    backbone_blocks.up(
                         in_channels= current_channels*s*2,
                         out_channels=current_channels,
                         embedding_size=hidden_channels
                         ))
             elif s == 1:
-                in_blocks.append(BigGanResidualSame(
+                in_blocks.append(backbone_blocks.same(
                     in_channels=current_channels,
                     out_channels=current_channels,
                     embedding_size=hidden_channels
                     ))
-                out_blocks.append(BigGanResidualSame(
+                out_blocks.append(backbone_blocks.same(
                     in_channels=current_channels*2,
                     out_channels=current_channels,
                     embedding_size=hidden_channels
@@ -143,7 +147,7 @@ class Diffusion(pl.LightningModule):
         return t_value/base
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(),lr=2e-5)
+        optimizer = torch.optim.Adam(self.parameters(),lr=6e-5)
         return optimizer
 
     def reconstruction_loss(self, sr, hr):
