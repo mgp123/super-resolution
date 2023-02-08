@@ -27,24 +27,25 @@ def low_pass_filter(x: torch.Tensor, cut_bin=20):
 # slightly modified version of the one used in another project 
 def get_data_loaders(batch_size: int, dimension: int, slice_size: int = 40, random_crop:bool=True, dataset=None) -> Tuple[data.DataLoader, data.DataLoader]:
     t = transforms.ToTensor()
-    if random_crop:                
-        t = transforms.Compose(
-            [
-                transforms.ToTensor(), 
-                transforms.RandomCrop(size=(slice_size,)*dimension),
+    if dimension < 3:
+        if random_crop:                
+            t = transforms.Compose(
+                [
+                    transforms.ToTensor(), 
+                    transforms.RandomCrop(size=(slice_size,)*dimension),
 
-                #transforms.RandomCrop(size=(([slice_size]*dimension))),
-            ]
-            )
-    else:
-        t = transforms.Compose(
-            [
-                transforms.Resize(size=(slice_size,)*dimension),
-                transforms.ToTensor(), 
+                    #transforms.RandomCrop(size=(([slice_size]*dimension))),
+                ]
+                )
+        else:
+            t = transforms.Compose(
+                [
+                    transforms.Resize(size=(slice_size,)*dimension),
+                    transforms.ToTensor(), 
 
-                #transforms.RandomCrop(size=(([slice_size]*dimension))),
-            ]
-            )
+                    #transforms.RandomCrop(size=(([slice_size]*dimension))),
+                ]
+                )
     if dataset is None:
         if not exists("dataset"):
             raise Exception("No dataset found. You need to put your directory with the images inside the dataset "
@@ -161,20 +162,26 @@ def generic_loaders(dataset, batch_size)-> Tuple[data.DataLoader, data.DataLoade
 
 
 class BrainDataset(Dataset):
-    def __init__(self, path) -> None:
+    def __init__(self, path, slice_size) -> None:
         super(BrainDataset).__init__()
 
         self.files = glob.glob(path + "/**/*.nii*", recursive=True)
         self.transform = None
+        self.slice_size = slice_size
 
     def __getitem__(self,index):
-        itkimage = sitk.ReadImage(files[index])
+        itkimage = sitk.ReadImage(self.files[index])
         numpyImage = sitk.GetArrayFromImage(itkimage)
 
         if self.transform is not None:
             numpyImage = self.transform(numpyImage)
+        
+        indexes = []
+        for k, s in enumerate(self.slice_size):
 
-        return numpyImage
+            indexes.append(random.randint(0,numpyImage.shape[k]- s)) 
+        res =  numpyImage[ indexes[0]:indexes[0]+self.slice_size[0], indexes[1]:indexes[1]+self.slice_size[1], indexes[2]:indexes[2]+self.slice_size[2]]
+        return res[np.newaxis,...]*1.0, 0
 
     def __len__(self):
         return len(self.files)
@@ -239,5 +246,5 @@ class VideoDataset(Dataset):
         
 
  
-files = glob.glob("local/dataset/many_heads/**/*.nii*", recursive=True)
-print(files)
+# files = glob.glob("local/dataset/many_heads/**/*.nii*", recursive=True)
+# print(files)

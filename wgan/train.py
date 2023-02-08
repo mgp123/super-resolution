@@ -2,7 +2,7 @@ from os import makedirs
 from os.path import exists
 import torch
 from tqdm import tqdm
-from data_loader import VideoDataset, generic_loaders, get_data_loaders, get_data_loaders_dummy, low_pass_filter
+from data_loader import BrainDataset, VideoDataset, generic_loaders, get_data_loaders, get_data_loaders_dummy, low_pass_filter
 from model.discriminator import Discriminator
 from model.generator import Generator
 from torch.utils.tensorboard import SummaryWriter
@@ -36,12 +36,17 @@ def mean_and_blurr(kernel_size=19):
 def get_low_resolution_method(**kwargs):
 
     low_size = kwargs.get("low_size", kwargs["spatial_size"][0]//2)
-
-    downsize = torchvision.transforms.Resize(low_size)
-    upsize = torchvision.transforms.Resize(kwargs["spatial_size"])
+    # downsize = torchvision.transforms.Resize(low_size)
+    # upsize = torchvision.transforms.Resize(kwargs["spatial_size"])
     
     def down_size(x):
-        return upsize(downsize(x))
+        return torch.nn.functional.interpolate(
+            torch.nn.functional.interpolate(
+                x, size= low_size
+            ),
+            size=kwargs["spatial_size"]
+        )
+        # return upsize(downsize(x))
 
     return down_size
 
@@ -50,10 +55,10 @@ def get_low_resolution_method(**kwargs):
         return low_pass_filter(x, **kwargs)
 
 def train():
-    batch_size = 32
-    spatial_size = (128,128)
-    in_channels = 3
-    out_channels=3
+    batch_size = 20
+    spatial_size = (40,40,40)
+    in_channels = 1
+    out_channels=1
     learning_rate = 2e-5
     initial_epoch = 0
     epochs = 40
@@ -66,7 +71,7 @@ def train():
     low_pass_filter_cut_bin = 5
     device = "cuda:0"
     discriminator_iterations_per_batch = 1
-    model_name = "trainning_large"
+    model_name = "trainning_brain"
     makedirs("runs", exist_ok=True)
     makedirs("saved_weights", exist_ok=True)
 
@@ -74,7 +79,7 @@ def train():
     use_scaler = False
     opener = torch.cuda.amp.autocast if use_scaler else dummyWith
     scaler = torch.cuda.amp.GradScaler()
-    dimension = 2
+    dimension = 3
 
     g = Generator(
         dimension,
@@ -99,7 +104,6 @@ def train():
     )
     # low_resolution_method = mean_and_blurr(kernel_size=21)
 
-    low_resolution_method = get_low_resolution_method(spatial_size=spatial_size, low_size=32)
 
     if exists(f"saved_weights/{model_name}.model"):
         save = torch.load(f"saved_weights/{model_name}.model")
@@ -121,7 +125,9 @@ def train():
     #     VideoDataset(video_paths=video_paths,crop_size=crop_size,frames_size=frames),
     #      batch_size)
 
-    data_loader_train, data_loader_test = get_data_loaders(batch_size, dimension, spatial_size[0], random_crop=True)
+    dataset = BrainDataset("local", slice_size=spatial_size)
+    low_resolution_method = get_low_resolution_method(spatial_size=spatial_size, low_size=(20,40,40))
+    data_loader_train, data_loader_test = get_data_loaders(batch_size, dimension, spatial_size[0], random_crop=False, dataset=dataset)
 
     for epoch in tqdm(range(initial_epoch, epochs), initial=initial_epoch, total=epochs, desc="epoch"):
         for samples_hr, _ in tqdm(data_loader_train, leave=False, desc="batch"):
