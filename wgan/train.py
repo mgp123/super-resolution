@@ -9,6 +9,13 @@ from torch.utils.tensorboard import SummaryWriter
 import torch.autograd
 import torchvision
 
+class dummyWith():
+    def __init__(self):
+        pass
+    def __enter__(self):
+        pass
+    def __exit__(self, type, value, traceback):
+        pass
 
 def freeze_network(m):
     for p in m.parameters():
@@ -28,7 +35,9 @@ def mean_and_blurr(kernel_size=19):
 
 def get_low_resolution_method(**kwargs):
 
-    downsize = torchvision.transforms.Resize(kwargs["spatial_size"]//2)
+    low_size = kwargs.get("low_size", kwargs["spatial_size"][0]//2)
+
+    downsize = torchvision.transforms.Resize(low_size)
     upsize = torchvision.transforms.Resize(kwargs["spatial_size"])
     
     def down_size(x):
@@ -41,35 +50,38 @@ def get_low_resolution_method(**kwargs):
         return low_pass_filter(x, **kwargs)
 
 def train():
-    batch_size = 16
-    spatial_size = (10,40,40)
-    in_channels = 1
+    batch_size = 32
+    spatial_size = (128,128)
+    in_channels = 3
     out_channels=3
-    learning_rate = 1e-4
+    learning_rate = 2e-5
     initial_epoch = 0
     epochs = 40
-    epochs_per_checkpoint = 20
+    epochs_per_checkpoint = 1
     write_loss_every = batch_size*4
     seen_samples = 0
-    coefficient_perceptual_loss = 8e-1
-    coefficient_lipschitz_loss = 1
+    coefficient_perceptual_loss = 0.5
+    coefficient_reconstruction_loss = 0.5
+    coefficient_lipschitz_loss = 1e-1
     low_pass_filter_cut_bin = 5
     device = "cuda:0"
-    discriminator_iterations_per_batch = 3
-    model_name = "trainning_video"
+    discriminator_iterations_per_batch = 1
+    model_name = "trainning_large"
     makedirs("runs", exist_ok=True)
     makedirs("saved_weights", exist_ok=True)
 
     writer = SummaryWriter(log_dir=f"runs/{model_name}")
+    use_scaler = False
+    opener = torch.cuda.amp.autocast if use_scaler else dummyWith
     scaler = torch.cuda.amp.GradScaler()
-    dimension = 3
+    dimension = 2
 
     g = Generator(
         dimension,
         in_channels=in_channels,
         out_channels=out_channels,
-        n_dense_blocks=8,
-        layers_per_dense_block=6
+        n_dense_blocks=4,
+        layers_per_dense_block=4
     )
     d = Discriminator(dimension,in_channels=out_channels, spatial_size=spatial_size)
 
@@ -85,9 +97,9 @@ def train():
         d.parameters(),
         learning_rate,
     )
-    low_resolution_method = mean_and_blurr(kernel_size=21)
+    # low_resolution_method = mean_and_blurr(kernel_size=21)
 
-    # low_resolution_method = get_low_resolution_method(spatial_size=spatial_size)
+    low_resolution_method = get_low_resolution_method(spatial_size=spatial_size, low_size=32)
 
     if exists(f"saved_weights/{model_name}.model"):
         save = torch.load(f"saved_weights/{model_name}.model")
@@ -105,11 +117,11 @@ def train():
     video_paths = "local/scenes"
     crop_size = spatial_size[1]
     frames = spatial_size[0]
-    data_loader_train, data_loader_test = generic_loaders(
-        VideoDataset(video_paths=video_paths,crop_size=crop_size,frames_size=frames),
-         batch_size)
+    # data_loader_train, data_loader_test = generic_loaders(
+    #     VideoDataset(video_paths=video_paths,crop_size=crop_size,frames_size=frames),
+    #      batch_size)
 
-    # data_loader_train, data_loader_test = get_data_loaders(batch_size, dimension, spatial_size)
+    data_loader_train, data_loader_test = get_data_loaders(batch_size, dimension, spatial_size[0], random_crop=True)
 
     for epoch in tqdm(range(initial_epoch, epochs), initial=initial_epoch, total=epochs, desc="epoch"):
         for samples_hr, _ in tqdm(data_loader_train, leave=False, desc="batch"):
@@ -122,7 +134,7 @@ def train():
             optimizer_g.zero_grad()
             optimizer_d.zero_grad()
 
-            with torch.cuda.amp.autocast():
+            with opener():
                 samples_sr = g(samples_lr)
                 samples_sr_constant = samples_sr.detach()
 
@@ -130,7 +142,7 @@ def train():
             freeze_network(g)
             
             for _ in range(discriminator_iterations_per_batch):
-                with torch.cuda.amp.autocast():
+                with opener():
                     score_loss = (d(samples_sr_constant) - d(samples_hr)).mean()
                     flattened_dims = [-1,1] + [1]*dimension
                     
@@ -159,26 +171,36 @@ def train():
                 if torch.isnan(discrminator_loss).any():
                     raise ValueError('Found NaN during training')
 
-                scaler.scale(discrminator_loss).backward()
-                scaler.step(optimizer_d)
-                scaler.update()
+                if use_scaler:
+                    scaler.scale(discrminator_loss).backward()
+                    scaler.step(optimizer_d)
+                    scaler.update()
+                else:
+                    discrminator_loss.backward()
+                    optimizer_d.step()
+
                 optimizer_d.zero_grad()
 
 
             unfreeze_network(g)
             freeze_network(d)
 
-            with torch.cuda.amp.autocast():
+            with opener():
                 perceptual_loss = - d(samples_sr).mean()
                 l1_loss = torch.nn.functional.l1_loss(samples_hr, samples_sr,reduction='sum')/samples_hr.shape[0]
-                generator_loss =  l1_loss + coefficient_perceptual_loss * perceptual_loss
+                generator_loss =  coefficient_reconstruction_loss*l1_loss + coefficient_perceptual_loss * perceptual_loss
 
             if torch.isnan(generator_loss).any():
                 raise ValueError('Found NaN during training')
 
-            scaler.scale(generator_loss).backward()
-            scaler.step(optimizer_g)
-            scaler.update()
+            if use_scaler:
+                scaler.scale(generator_loss).backward()
+                scaler.step(optimizer_g)
+                scaler.update()
+            else:
+                generator_loss.backward()
+                optimizer_g.step()
+
             optimizer_g.zero_grad()
 
             if seen_samples % write_loss_every == 0:

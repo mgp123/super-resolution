@@ -8,7 +8,6 @@ import matplotlib.pyplot as plt
 class AttentionHead(nn.Module):
     def __init__(self, channels, value_channels, layer_norm=True):
         super(AttentionHead, self).__init__()
-        print("I'm real shady")
 
         self.init_transform = nn.Identity()
 

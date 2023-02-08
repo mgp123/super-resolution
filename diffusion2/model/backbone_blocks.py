@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 
+from model.residual_block import ResidualBlock, ResidualBlockDown, ResidualBlockUp
 from model.big_gan_residual import BigGanResidualDown, BigGanResidualSame, BigGanResidualUp
 
 class BackboneBlocks:
@@ -9,5 +10,10 @@ class BackboneBlocks:
             self.up = BigGanResidualUp
             self.down = BigGanResidualDown
             self.same = BigGanResidualSame
+
+        elif backbone_type == "swish-conv":
+            self.up = ResidualBlockUp
+            self.down = ResidualBlockDown
+            self.same = ResidualBlock
         else:
             raise ValueError(f"BackboneBlocks does not recognize '{backbone_type}'")

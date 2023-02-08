@@ -10,6 +10,8 @@ import cv2
 import random
 import numpy as np
 import os
+import glob
+import SimpleITK as sitk
 
 def low_pass_filter(x: torch.Tensor, cut_bin=20):
     n = x.shape[-1]
@@ -23,10 +25,7 @@ def low_pass_filter(x: torch.Tensor, cut_bin=20):
     return torch.fft.ifftn(fftn, dim=[-3,-2,-1]).real
 
 # slightly modified version of the one used in another project 
-def get_data_loaders(batch_size: int, dimension: int, slice_size: int = 40, random_crop:bool=True) -> Tuple[data.DataLoader, data.DataLoader]:
-    if not exists("dataset"):
-        raise Exception("No dataset found. You need to put your directory with the images inside the dataset "
-                        "directory")
+def get_data_loaders(batch_size: int, dimension: int, slice_size: int = 40, random_crop:bool=True, dataset=None) -> Tuple[data.DataLoader, data.DataLoader]:
     t = transforms.ToTensor()
     if random_crop:                
         t = transforms.Compose(
@@ -37,9 +36,24 @@ def get_data_loaders(batch_size: int, dimension: int, slice_size: int = 40, rand
                 #transforms.RandomCrop(size=(([slice_size]*dimension))),
             ]
             )
+    else:
+        t = transforms.Compose(
+            [
+                transforms.Resize(size=(slice_size,)*dimension),
+                transforms.ToTensor(), 
 
+                #transforms.RandomCrop(size=(([slice_size]*dimension))),
+            ]
+            )
+    if dataset is None:
+        if not exists("dataset"):
+            raise Exception("No dataset found. You need to put your directory with the images inside the dataset "
+                            "directory")
 
-    dataset = datasets.ImageFolder("dataset", t)
+        dataset = datasets.ImageFolder("dataset", t)
+    else:
+        dataset.transform = t
+
     test_set_size = 4
     test_set, train_set = data.random_split(
         dataset,
@@ -145,6 +159,27 @@ def generic_loaders(dataset, batch_size)-> Tuple[data.DataLoader, data.DataLoade
 
     return data_loader_train, data_loader_test
 
+
+class BrainDataset(Dataset):
+    def __init__(self, path) -> None:
+        super(BrainDataset).__init__()
+
+        self.files = glob.glob(path + "/**/*.nii*", recursive=True)
+        self.transform = None
+
+    def __getitem__(self,index):
+        itkimage = sitk.ReadImage(files[index])
+        numpyImage = sitk.GetArrayFromImage(itkimage)
+
+        if self.transform is not None:
+            numpyImage = self.transform(numpyImage)
+
+        return numpyImage
+
+    def __len__(self):
+        return len(self.files)
+
+
 class VideoDataset(Dataset):
     def __init__(self,video_paths, crop_size,frames_size) -> None:
        super(VideoDataset).__init__()
@@ -204,3 +239,5 @@ class VideoDataset(Dataset):
         
 
  
+files = glob.glob("local/dataset/many_heads/**/*.nii*", recursive=True)
+print(files)

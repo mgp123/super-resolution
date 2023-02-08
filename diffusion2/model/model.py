@@ -33,7 +33,8 @@ class Diffusion(pl.LightningModule):
         scales, 
         attention=False,
         context_encoding="lower_resolution",
-        backbone_type="big_gan"
+        backbone_type="big_gan",
+        n_attention_heads=1,
         ):
         super(Diffusion, self).__init__()
         self.save_hyperparameters()
@@ -104,7 +105,7 @@ class Diffusion(pl.LightningModule):
                 in_channels=current_channels,
                 out_channels=current_channels,
                 value_channels=current_channels,
-                n_heads=1,
+                n_heads=n_attention_heads,
                 patch_size=1
                 )
         else:
@@ -140,6 +141,13 @@ class Diffusion(pl.LightningModule):
         return self.final_transform(y)
 
     def variance_scheudle(self,t,max_t=1000):
+        relative_t = t/max_t
+        betas = torch.linspace(1e-4,2e-2,1000)
+        variances = torch.cumprod(1-betas, dim=0)
+        indexes = (max_t* relative_t).type(torch.int64) - 1
+        return variances.gather(0,indexes)
+
+
         s = 0.008
         base = math.cos(s*math.pi/ (2*(1+s)))
         t_value = torch.cos((t/max_t + s)*math.pi/ (2*(1+s)))
@@ -147,7 +155,7 @@ class Diffusion(pl.LightningModule):
         return t_value/base
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(),lr=6e-5)
+        optimizer = torch.optim.Adam(self.parameters(),lr=2e-5)
         return optimizer
 
     def reconstruction_loss(self, sr, hr):

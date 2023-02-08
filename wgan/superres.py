@@ -65,15 +65,16 @@ def make_superres(g, lr, overlap, kernel_size=64):
 
 # print(get_n_params(d))
 
-model_path = "saved_weights/trainning2.model"
-spatial_size = 64
+model_path = "saved_weights/trainning_large.model"
+spatial_size = 128
 batch_size = 1
 low_pass_filter_cut_bin = 3
 g = Generator(
     dimensions=2,
     in_channels=3,
-    n_dense_blocks=8,
-    layers_per_dense_block=6
+    out_channels=3,
+    n_dense_blocks=4,
+    layers_per_dense_block=4
 )
 
 
@@ -91,7 +92,7 @@ g = g.eval()
 imgs = []
 
 
-data_loader_train, data_loader_test = get_data_loaders(4, 2, slice_size=64, random_crop=False)
+data_loader_train, data_loader_test = get_data_loaders(4, 2, slice_size=128, random_crop=False)
 # sample_image = torchvision.io.read_image(path)/255
 
 sample_image, _ = next(iter(data_loader_test))
@@ -112,7 +113,7 @@ for spatial_dim, low_dim in [(128, 64)]:
 
     # sample_image.unsqueeze_(0)
     sample_image = sample_image.to("cuda:0")
-    sr = make_superres(g,sample_image, overlap=32)
+    sr = make_superres(g,sample_image, overlap=0,kernel_size=32)
 
     images = torch.stack([hr,sample_image, sr])
 

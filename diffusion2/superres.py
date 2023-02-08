@@ -17,18 +17,23 @@ from torchvision.transforms import transforms
 
 
 def variance_scheudle(relative_t):
+    # betas = torch.linspace(1e-4,2e-2,1000)
+    # variances = torch.cumprod(1-betas, dim=0)
+    # indexes = int(1000* relative_t) - 1
+    # # print(indexes, relative_t)
+    # return variances[indexes]
+
     # return torch.tensor(0.07)
     # return torch.clip(torch.tensor(2*(relative_t))**2,min=0, max=0.999)
-    return (torch.tensor(1-relative_t)*0.8 + 0.2)**0.5
+    # return (torch.tensor(1-relative_t)*0.8 + 0.2)**0.5
     s = 0.008
     base = math.cos(s*math.pi/ (2*(1+s)))
-    t_value = math.cos((relative_t + s)*math.pi/ (2*(1+s)))
+    t_value = torch.cos((relative_t + s)*math.pi/ (2*(1+s)))
 
-    # return (torch.tensor((t_value/base)))
+    return (torch.tensor((t_value/base)))
     return 0.8 + 0.15*(torch.tensor((t_value/base)))
 
-ckpt_file_path = "./runs/diffusion_generator/version_11/checkpoints/epoch=65-step=148716.ckpt"
-
+ckpt_file_path = "./runs/diffusion_generator_swish/version_1/checkpoints/epoch=39-step=43720.ckpt"
 # d = Diffusion(in_channels=6, out_channels=3, hidden_channels=32,scales=2)
 d = Diffusion.load_from_checkpoint(ckpt_file_path)
 
@@ -43,7 +48,11 @@ def denioise(shape, context=None, init_t=max_t, step=1, end=0):
     image = torch.randn(shape, device="cuda:0")
     # low_res_image = low_res_image*0.5 + 1
     # variance = variance_scheudle(init_t, max_t).to("cuda:0")
-
+    quant_size = 1000
+    betas_g = torch.linspace(3e-5,1e-2,1000)
+    variances_g = torch.cumprod(1-betas_g, dim=0)
+    # variances_g = variance_scheudle(torch.linspace(0,1,1000))
+    # print(indexes, relative_t)
     # # proxy for noisy high res
     # image = low_res_image * torch.sqrt(variance) + torch.randn_like(low_res_image) * torch.sqrt(1-variance)
 
@@ -54,14 +63,20 @@ def denioise(shape, context=None, init_t=max_t, step=1, end=0):
             coef = 1
             t = max(t,1)
             relative_t =  1 -(init_t - t)/(init_t-end)
-            relative_t_prev = max( 1 - (init_t - t - 1)/(init_t-end),0.002)
+            relative_t_prev = max( 1 - (init_t - t + step)/(init_t-end),0.002)
 
             # variance = torch.tensor(float(input("get input ")))
             # variance_prev = variance
-            variance = variance_scheudle(relative_t).to("cuda:0").repeat(shape[0])
-            variance_prev = variance_scheudle(relative_t_prev).to("cuda:0").repeat(shape[0])
+            variance =  variances_g[int(quant_size* relative_t) - 1].to("cuda:0").repeat(shape[0])
+            variance_prev =  variances_g[int(quant_size* relative_t_prev) - 1].to("cuda:0").repeat(shape[0])
 
-            if t-step <= end - 1 :
+            # variance = variance_scheudle(relative_t).to("cuda:0").repeat(shape[0])
+            # variance_prev = variance_scheudle(relative_t_prev).to("cuda:0").repeat(shape[0])
+            if t == init_t:
+                variance_prev = variance_prev*0
+
+            if t-step <= end :
+                print("last")
                 variance_prev = variance_prev*0 + 1
                 variance = variance*0 + 1
                 coef = 0
@@ -79,11 +94,15 @@ def denioise(shape, context=None, init_t=max_t, step=1, end=0):
             variance = variance.view(*(-1, *(len(image.shape) - 1)* [1]))
             variance_prev = variance_prev.view(*(-1, *(len(image.shape) - 1)* [1]))
 
-            beta = torch.clip( 1 - variance_prev/variance, max=0.99, min=0)
+            beta = betas_g[int(quant_size* relative_t) - 1].to("cuda:0").repeat(shape[0]).view(variance.shape)
+            # beta = torch.clip(1-variance/variance_prev,max=0.999)
             alpha = 1 - beta 
 
             denoised_1_pass = (image -  noise_estimate * torch.sqrt(1-variance) ) * torch.sqrt(1.0/variance)
-            # denoised_1_pass = torch.clip(denoised_1_pass, min=-1., max=1.)
+            denoised_1_pass = torch.clip(denoised_1_pass, min=-1., max=1.)
+
+            denoised_coef =  beta  * torch.sqrt(variance_prev)  / (1 - variance)
+            step_coef = torch.sqrt(alpha) * (1. - variance_prev) / (1 - variance)
             
             if t % 1 == 0:
                 image_grid = make_grid( (0.5 + 0.5* image.cpu()), nrow=3)
@@ -92,21 +111,25 @@ def denioise(shape, context=None, init_t=max_t, step=1, end=0):
                     print(t)
                     variance = variance*0 + torch.tensor(float(input("get input ")))
                     variance_prev = variance
-                    print( 1 * torch.sqrt(1.0/(1-variance))   * torch.sqrt(1.0/alpha) )
-                    print(beta  * (1 - variance_prev) / (1 - variance)  )
-                    print(variance)
+                    print(step_coef.view(-1)[0])
+                    print(denoised_coef.view(-1)[0])
+                    print(beta.view(-1)[0])
                     plt.imshow(toPil(image_grid))
                     plt.show()
             
-            noise_mult = 0.5  # max(1 -  1.* ((t-init_t)/(end-init_t))**4,0)
+            noise_mult =  torch.sqrt(beta * (1. - variance_prev) / (1 - variance) )  # max(1 -  1.* ((t-init_t)/(end-init_t))**4,0)
             if relative_t < False:
                 # variance = variance*0 + 1
                 plt.imshow(toPil(image_grid))
                 plt.show()
 
             noise = torch.randn_like(image)
-            image = denoised_1_pass * torch.sqrt(variance_prev)  +  torch.sqrt(1-variance_prev)*noise*coef*noise_mult
-            # image = (image -  noise_estimate * (beta) * torch.sqrt(1.0/(1-variance)) )  * torch.sqrt(1.0/alpha)  + beta*noise
+            # image = denoised_1_pass* torch.sqrt(variance_prev) 
+            # image = image*step_coef + denoised_1_pass*denoised_coef
+            image = denoised_1_pass * torch.sqrt(variance_prev)  +  torch.sqrt(1-variance_prev)*noise*coef
+            # image = denoised_1_pass * torch.sqrt(variance_prev)  +  noise_mult*noise*coef
+
+            # image = (image -  noise_estimate * (beta) * torch.sqrt(1.0/(1-variance)) )  * torch.sqrt(1.0/alpha)  
             # image = (image ) -  noise_estimate *  1 * torch.sqrt(1.0/(1-variance))   * torch.sqrt(1.0/alpha) 
             # image = image - beta * noise_estimate       
 
@@ -115,12 +138,13 @@ def denioise(shape, context=None, init_t=max_t, step=1, end=0):
             # image = torch.clip(image, min=0, max=.9)
             # image = denoised_1_pass
             # image = image + noise*coef*noise_mult
-
+            # image = image + noise*noise_mult
             # clipping to help remove some of the estimate error for x_{t-1}
             clip_power = 2*torch.sqrt(1-variance_prev)
-            image = torch.clip(image, min=-1-clip_power, max=1+clip_power)
+            # image = torch.clip(image, min=-1-clip_power, max=1+clip_power)
             var_list.append( ( variance.view(-1)[0]).cpu())
-            
+            # print(variance_prev)
+
 
     denoised = image
     # print(variance)
@@ -167,7 +191,7 @@ for spatial_dim, low_dim in [(64,32)]:
         images = torch.stack([hr,sample_image[0], sr])
 
     else:
-        sr =  0.5 + 0.5*denioise((3*5,*hr.shape), context=None, step=1, init_t=200, end=0).to("cuda:0")
+        sr =  0.5 + 0.5*denioise((3*5,*hr.shape), context=None, step=15, init_t=1000, end=0).to("cuda:0")
         images = sr
 
     images = 0.5*(images.cpu()+1)

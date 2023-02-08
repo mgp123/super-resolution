@@ -38,7 +38,10 @@ class ResidualBlock(nn.Module):
             group_norm=group_norm,
             )
         
-        self.embedding = nn.Linear(embedding_size,out_channels)
+        self.embedding = nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(embedding_size,out_channels)
+        )
 
         self.skip = nn.Conv2d(
             in_channels=in_channels,
