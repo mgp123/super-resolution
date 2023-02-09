@@ -162,10 +162,10 @@ def generic_loaders(dataset, batch_size)-> Tuple[data.DataLoader, data.DataLoade
 
 
 class BrainDataset(Dataset):
-    def __init__(self, path, slice_size) -> None:
+    def __init__(self, path, slice_size, passes=50) -> None:
         super(BrainDataset).__init__()
 
-        self.files = glob.glob(path + "/**/*.nii*", recursive=True)
+        self.files = glob.glob(path + "/**/*.nii*", recursive=True)*passes
         self.transform = None
         self.slice_size = slice_size
 
@@ -177,6 +177,7 @@ class BrainDataset(Dataset):
             numpyImage = self.transform(numpyImage)
         
         indexes = []
+        print(numpyImage.shape)
         for k, s in enumerate(self.slice_size):
 
             indexes.append(random.randint(0,numpyImage.shape[k]- s)) 

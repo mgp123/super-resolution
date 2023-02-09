@@ -55,18 +55,18 @@ def get_low_resolution_method(**kwargs):
         return low_pass_filter(x, **kwargs)
 
 def train():
-    batch_size = 20
+    batch_size = 12
     spatial_size = (40,40,40)
     in_channels = 1
     out_channels=1
     learning_rate = 2e-5
     initial_epoch = 0
     epochs = 40
-    epochs_per_checkpoint = 1
-    write_loss_every = batch_size*4
+    epochs_per_checkpoint = 10
+    write_loss_every = batch_size*10
     seen_samples = 0
-    coefficient_perceptual_loss = 0.5
-    coefficient_reconstruction_loss = 0.5
+    coefficient_perceptual_loss = 0.01
+    coefficient_reconstruction_loss = 0.99
     coefficient_lipschitz_loss = 1e-1
     low_pass_filter_cut_bin = 5
     device = "cuda:0"
