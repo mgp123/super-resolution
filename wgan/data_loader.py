@@ -162,27 +162,50 @@ def generic_loaders(dataset, batch_size)-> Tuple[data.DataLoader, data.DataLoade
 
 
 class BrainDataset(Dataset):
-    def __init__(self, path, slice_size, passes=50) -> None:
+    def __init__(self, path, slice_size, low_size, passes=50, ) -> None:
         super(BrainDataset).__init__()
 
         self.files = glob.glob(path + "/**/*.nii*", recursive=True)*passes
         self.transform = None
         self.slice_size = slice_size
+        self.low_size = low_size
 
     def __getitem__(self,index):
         itkimage = sitk.ReadImage(self.files[index])
-        numpyImage = sitk.GetArrayFromImage(itkimage)
+        numpyImage = sitk.GetArrayFromImage(itkimage)*1.0
 
         if self.transform is not None:
             numpyImage = self.transform(numpyImage)
         
+        # normalization sort of
+        numpyImage = (numpyImage - torch.mean(numpyImage)) - torch.std(numpyImage) 
+        numpyImage = numpyImage.unsqueeze(0).unsqueeze(0)
+
+
+        lr_numpyImage = torch.nn.functional.interpolate(
+                numpyImage, size= (self.low_size)
+            )
+
+        lr_numpyImage = torch.nn.functional.interpolate(
+            lr_numpyImage,
+            size=(numpyImage.shape[2:])
+        )
+
+
+        numpyImage = numpyImage.squeeze(0).squeeze(0)
+        lr_numpyImage = lr_numpyImage.squeeze(0).squeeze(0)
+
+
         indexes = []
-        print(numpyImage.shape)
         for k, s in enumerate(self.slice_size):
 
             indexes.append(random.randint(0,numpyImage.shape[k]- s)) 
         res =  numpyImage[ indexes[0]:indexes[0]+self.slice_size[0], indexes[1]:indexes[1]+self.slice_size[1], indexes[2]:indexes[2]+self.slice_size[2]]
-        return res[np.newaxis,...]*1.0, 0
+        res_lr =  lr_numpyImage[ indexes[0]:indexes[0]+self.slice_size[0], indexes[1]:indexes[1]+self.slice_size[1], indexes[2]:indexes[2]+self.slice_size[2]]
+        res = res[np.newaxis,...]*1.0
+        res_lr = res_lr[np.newaxis,...]*1.0
+
+        return res, res_lr
 
     def __len__(self):
         return len(self.files)

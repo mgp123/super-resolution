@@ -83,25 +83,28 @@ def make_superres(g, lr, overlap, kernel_size=64):
     return res
 
 
-def make_superres3d(g, lr, overlap, kernel_size=64):
+def make_superres3d(g, lr, step, kernel_size):
+    with torch.no_grad():
 
-    res = torch.zeros_like(lr)
-    counts = torch.zeros_like(lr)
+        res = torch.zeros_like(lr)
+        counts = torch.zeros_like(lr)
 
 
-    dims = lr.shape[-3:]
-    for i in range(0,dims[0],kernel_size):
-        for j in range(0,dims[1],kernel_size):
-            for k in range(0,dims[2],kernel_size):
-                block = lr[:,:,i:i+kernel_size, j:j+kernel_size, k:k+kernel_size]
-                sr_block = g(block)
-                res[:,:,i:i+kernel_size, j:j+kernel_size, k:k+kernel_size] = block
-    return res
+        dims = lr.shape[-3:]
+        for i in tqdm(range(0,dims[0],step[0])):
+            for j in range(0,dims[1],step[1]):
+                for k in range(0,dims[2],step[2]):
+                    block = lr[:,:,i:i+kernel_size[0], j:j+kernel_size[1], k:k+kernel_size[2]]
+                    sr_block = g(block)
+                    res[:,:,i:i+kernel_size[0], j:j+kernel_size[1], k:k+kernel_size[2]] += sr_block
+                    counts[:,:,i:i+kernel_size[0], j:j+kernel_size[1], k:k+kernel_size[2]]  += 1
+
+        return res
 
 
 # print(get_n_params(d))
 
-model_path = "saved_weights/trainning_brain.model"
+model_path = "saved_weights/trainning_brain3.model"
 spatial_size = 128
 batch_size = 1
 low_pass_filter_cut_bin = 3
@@ -109,8 +112,8 @@ g = Generator(
     dimensions=3,
     in_channels=1,
     out_channels=1,
-    n_dense_blocks=4,
-    layers_per_dense_block=4
+    n_dense_blocks=3,
+    layers_per_dense_block=2
 )
 
 
@@ -128,7 +131,7 @@ g = g.eval()
 imgs = []
 
 s_brain = (256, 146, 256)
-l_brain = (s_brain[0], 20 , s_brain[2])
+l_brain = (160, 20 , 160)
 
 dataset = BrainDataset("local", slice_size=s_brain)
 data_loader_train, data_loader_test = get_data_loaders(4, 3, slice_size=128, random_crop=False, dataset=dataset)
@@ -155,18 +158,18 @@ for spatial_dim, low_dim in [(128, 64)]:
 
     # sample_image.unsqueeze_(0)
     sample_image = sample_image.to("cuda:0")
-    sr = make_superres3d(g,sample_image, overlap=0,kernel_size=40)
+    sr = make_superres3d(g,sample_image, step=(64,20,64),kernel_size=(64,40,64) )
 
     images = torch.stack([hr,sample_image, sr])
 
     # images = 0.5*(images.cpu()+1)
     images.cpu()
-
-    sr = sr[0,0]
+    i = 50
+    sr = sr[0,0]#[i:i+64,i:i+40,i:i+64]
     lr = sample_image[0,0].cpu()
-    hr = hr[0,0].cpu()
-    print("sr", sr.shape)
-    print("hr", hr.shape)
+    hr = hr[0,0].cpu()#[i:i+64,i:i+40,i:i+64]
+    print("sr", sr.shape, torch.min(sr), torch.max(sr), torch.mean(sr))
+    print("hr", hr.shape,  torch.min(hr), torch.max(hr), torch.mean(hr))
     print("lr", lr.shape)
 
     result_image = sitk.GetImageFromArray(sr.cpu())

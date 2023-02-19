@@ -55,23 +55,23 @@ def get_low_resolution_method(**kwargs):
         return low_pass_filter(x, **kwargs)
 
 def train():
-    batch_size = 12
-    spatial_size = (40,40,40)
+    batch_size = 8
+    spatial_size = (64,40,64)
     in_channels = 1
     out_channels=1
-    learning_rate = 2e-5
+    learning_rate = 2e-4
     initial_epoch = 0
     epochs = 40
     epochs_per_checkpoint = 10
-    write_loss_every = batch_size*10
+    write_loss_every = batch_size*5
     seen_samples = 0
     coefficient_perceptual_loss = 0.01
     coefficient_reconstruction_loss = 0.99
-    coefficient_lipschitz_loss = 1e-1
+    coefficient_lipschitz_loss = 1e-2
     low_pass_filter_cut_bin = 5
     device = "cuda:0"
     discriminator_iterations_per_batch = 1
-    model_name = "trainning_brain"
+    model_name = "trainning_brain3"
     makedirs("runs", exist_ok=True)
     makedirs("saved_weights", exist_ok=True)
 
@@ -85,8 +85,8 @@ def train():
         dimension,
         in_channels=in_channels,
         out_channels=out_channels,
-        n_dense_blocks=4,
-        layers_per_dense_block=4
+        n_dense_blocks=3,
+        layers_per_dense_block=2
     )
     d = Discriminator(dimension,in_channels=out_channels, spatial_size=spatial_size)
 
@@ -125,14 +125,14 @@ def train():
     #     VideoDataset(video_paths=video_paths,crop_size=crop_size,frames_size=frames),
     #      batch_size)
 
-    dataset = BrainDataset("local", slice_size=spatial_size)
-    low_resolution_method = get_low_resolution_method(spatial_size=spatial_size, low_size=(20,40,40))
+    dataset = BrainDataset("local", slice_size=spatial_size,  low_size=(128,8,128))
+    low_resolution_method = get_low_resolution_method(spatial_size=spatial_size, low_size=(64,8,64))
     data_loader_train, data_loader_test = get_data_loaders(batch_size, dimension, spatial_size[0], random_crop=False, dataset=dataset)
 
     for epoch in tqdm(range(initial_epoch, epochs), initial=initial_epoch, total=epochs, desc="epoch"):
-        for samples_hr, _ in tqdm(data_loader_train, leave=False, desc="batch"):
-            samples_hr = samples_hr.to(device)
-            samples_lr = low_resolution_method(samples_hr)
+        for samples_hr, samples_lr in tqdm(data_loader_train, leave=False, desc="batch"):
+            samples_hr = samples_hr.to(device,dtype=torch.float)
+            samples_lr = samples_lr.to(device,dtype=torch.float)
 
             # samples_lr = low_resolution_method(samples_hr, cut_bin=low_pass_filter_cut_bin)
 
@@ -193,7 +193,7 @@ def train():
 
             with opener():
                 perceptual_loss = - d(samples_sr).mean()
-                l1_loss = torch.nn.functional.l1_loss(samples_hr, samples_sr,reduction='sum')/samples_hr.shape[0]
+                l1_loss = torch.nn.functional.l1_loss(samples_hr, samples_sr,reduction='mean')
                 generator_loss =  coefficient_reconstruction_loss*l1_loss + coefficient_perceptual_loss * perceptual_loss
 
             if torch.isnan(generator_loss).any():
