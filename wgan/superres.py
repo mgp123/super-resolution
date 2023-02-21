@@ -133,11 +133,11 @@ imgs = []
 s_brain = (256, 146, 256)
 l_brain = (160, 20 , 160)
 
-dataset = BrainDataset("local", slice_size=s_brain)
+dataset = BrainDataset("local", slice_size=s_brain, low_size=(128,8,128))
 data_loader_train, data_loader_test = get_data_loaders(4, 3, slice_size=128, random_crop=False, dataset=dataset)
 # sample_image = torchvision.io.read_image(path)/255
 
-sample_image, _ = next(iter(data_loader_test))
+sample_image = next(iter(data_loader_test))
 sample_image  = sample_image
 
 path = "local/faces/example3.png"
@@ -145,19 +145,19 @@ path = "local/faces/example3.png"
 
 # sample_image = (sample_image*2) - 1
 for spatial_dim, low_dim in [(128, 64)]:
-    print(spatial_dim)
-    print(torch.min(sample_image))
-    print(torch.max(sample_image))
+
     # hr = transforms.Resize(spatial_dim)(sample_image).to("cuda:0")
-    hr = (sample_image).to("cuda:0")
+    hr, lr = (sample_image)
+    hr = hr.to("cuda",dtype=torch.float)
+    lr = lr.to("cuda", dtype=torch.float)
 
-    print("sample_image", sample_image.shape)
+    sample_image = lr
 
-    sample_image = get_low_resolution_method(spatial_size=s_brain , low_size=l_brain)(sample_image)
-    print("sample_image", sample_image.shape)
+
+    # sample_image = get_low_resolution_method(spatial_size=s_brain , low_size=l_brain)(sample_image)
 
     # sample_image.unsqueeze_(0)
-    sample_image = sample_image.to("cuda:0")
+    # sample_image = sample_image.to("cuda:0")
     sr = make_superres3d(g,sample_image, step=(64,20,64),kernel_size=(64,40,64) )
 
     images = torch.stack([hr,sample_image, sr])
