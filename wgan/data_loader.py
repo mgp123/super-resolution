@@ -178,7 +178,7 @@ class BrainDataset(Dataset):
             numpyImage = self.transform(numpyImage)
         
         # normalization sort of
-        numpyImage = (numpyImage - torch.mean(numpyImage)) - torch.std(numpyImage) 
+        numpyImage = (numpyImage - torch.mean(numpyImage)) / torch.std(numpyImage) 
         numpyImage = numpyImage.unsqueeze(0).unsqueeze(0)
 
 
