@@ -173,6 +173,7 @@ class BrainDataset(Dataset):
     def __getitem__(self,index):
         itkimage = sitk.ReadImage(self.files[index])
         numpyImage = sitk.GetArrayFromImage(itkimage)*1.0
+        numpyImage = torch.from_numpy(numpyImage)
 
         if self.transform is not None:
             numpyImage = self.transform(numpyImage)
@@ -197,13 +198,16 @@ class BrainDataset(Dataset):
 
 
         indexes = []
-        for k, s in enumerate(self.slice_size):
+        if self.slice_size is not None:
+            for k, s in enumerate(self.slice_size):
 
-            indexes.append(random.randint(0,numpyImage.shape[k]- s)) 
-        res =  numpyImage[ indexes[0]:indexes[0]+self.slice_size[0], indexes[1]:indexes[1]+self.slice_size[1], indexes[2]:indexes[2]+self.slice_size[2]]
-        res_lr =  lr_numpyImage[ indexes[0]:indexes[0]+self.slice_size[0], indexes[1]:indexes[1]+self.slice_size[1], indexes[2]:indexes[2]+self.slice_size[2]]
-        res = res[np.newaxis,...]*1.0
-        res_lr = res_lr[np.newaxis,...]*1.0
+                indexes.append(random.randint(0,numpyImage.shape[k]- s)) 
+            res =  numpyImage[ indexes[0]:indexes[0]+self.slice_size[0], indexes[1]:indexes[1]+self.slice_size[1], indexes[2]:indexes[2]+self.slice_size[2]]
+            res_lr =  lr_numpyImage[ indexes[0]:indexes[0]+self.slice_size[0], indexes[1]:indexes[1]+self.slice_size[1], indexes[2]:indexes[2]+self.slice_size[2]]
+            res = res[np.newaxis,...]*1.0
+            res_lr = res_lr[np.newaxis,...]*1.0
+        else:
+            return lr_numpyImage, lr_numpyImage
 
         return res, res_lr
 

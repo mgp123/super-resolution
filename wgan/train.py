@@ -125,7 +125,7 @@ def train():
     #     VideoDataset(video_paths=video_paths,crop_size=crop_size,frames_size=frames),
     #      batch_size)
 
-    dataset = BrainDataset("local", slice_size=spatial_size,  low_size=(128,8,128))
+    dataset = BrainDataset("local", slice_size=spatial_size,  low_size=(256,32,128))
     low_resolution_method = get_low_resolution_method(spatial_size=spatial_size, low_size=(64,8,64))
     data_loader_train, data_loader_test = get_data_loaders(batch_size, dimension, spatial_size[0], random_crop=False, dataset=dataset)
 

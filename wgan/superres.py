@@ -99,7 +99,7 @@ def make_superres3d(g, lr, step, kernel_size):
                     res[:,:,i:i+kernel_size[0], j:j+kernel_size[1], k:k+kernel_size[2]] += sr_block
                     counts[:,:,i:i+kernel_size[0], j:j+kernel_size[1], k:k+kernel_size[2]]  += 1
 
-        return res
+        return res/counts
 
 
 # print(get_n_params(d))
@@ -158,7 +158,7 @@ for spatial_dim, low_dim in [(128, 64)]:
 
     # sample_image.unsqueeze_(0)
     # sample_image = sample_image.to("cuda:0")
-    sr = make_superres3d(g,sample_image, step=(64,20,64),kernel_size=(64,40,64) )
+    sr = make_superres3d(g,sample_image, step=(8,5,8),kernel_size=(64,40,64) )
 
     images = torch.stack([hr,sample_image, sr])
 

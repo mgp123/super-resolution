@@ -6,3 +6,5 @@ dataset
 */local/*
 *.gif
 *.mp4
+freesurfer*
+*.nii.gz
