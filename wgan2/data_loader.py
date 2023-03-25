@@ -12,6 +12,7 @@ import numpy as np
 import os
 import glob
 import SimpleITK as sitk
+import lightning.pytorch as pl
 
 
 class BrainDataset(Dataset):
@@ -24,7 +25,8 @@ class BrainDataset(Dataset):
     ) -> None:
         super(BrainDataset).__init__()
 
-        self.files = glob.glob(path + "/**/*.nii*", recursive=True) * passes
+
+        self.files = glob.glob(f"{path}/**/*.nii*", recursive=True) * passes
         self.slice_size = slice_size
         self.low_size = low_size
 
@@ -75,3 +77,24 @@ class BrainDataset(Dataset):
 
     def __len__(self):
         return len(self.files)
+
+
+class BrainModule(pl.LightningDataModule):
+    def __init__(
+        self,
+        batch_size,
+        path,
+        slice_size,
+        low_size,
+        passes=50,
+    ) -> None:
+        super().__init__()
+        self.batch_size = batch_size
+        self.data_dir = path
+        self.datset_config = (path, slice_size, low_size, passes)
+
+    def setup(self, stage: str):
+        self.train_data = BrainDataset(*self.datset_config)
+
+    def train_dataloader(self):
+        return data.DataLoader(self.train_data, batch_size=self.batch_size, num_workers=12, pin_memory=True)

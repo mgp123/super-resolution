@@ -116,7 +116,13 @@ class WGAN(pl.LightningModule):
         return gradients_interpolation
 
     @torch.no_grad()
-    def _superres(self, lr, step):
+    def _superres(self, lr, step=None):
+        if step is None:
+            step = (
+                self.kernel_size[0] // 2,
+                self.kernel_size[1] // 2,
+                self.kernel_size[2] // 2,
+            )
         lr = lr.to(self.device)
 
         kernel_size = self.kernel_size
